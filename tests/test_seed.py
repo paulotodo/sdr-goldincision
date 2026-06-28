@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.seed import CURSOS_SEED, run_seed
+from app.seed import CURSOS_SEED, LINKS_SEED, run_seed
 
 # ---------------------------------------------------------------------------
 # Testes unitarios (sem DB real — verifica logica e chamadas)
@@ -60,6 +60,24 @@ def test_cursos_seed_caminho_mapa_mestre():
         cmp = c.get("caminho_mapa_mestre")
         if cmp is not None:
             assert 1 <= cmp <= 6, f"caminho invalido: {cmp} (slug={c['slug']})"
+
+
+def test_links_seed_curso_online_3_idiomas():
+    """O curso online deve ter links de inscricao oficiais nos 3 idiomas."""
+    assert "curso-online-hg" in LINKS_SEED
+    links = LINKS_SEED["curso-online-hg"]
+    assert set(links.keys()) == {"pt", "en", "es"}
+    # URLs oficiais (texto exato do documento) — HotMart, nunca inventadas
+    assert links["pt"].startswith("https://hotmart.com/pt-br/")
+    assert links["es"] == "https://pay.hotmart.com/N95711232T?off=knlbem12"
+    assert links["en"] == "https://pay.hotmart.com/Q95039051K?off=h9zgo86a"
+
+
+def test_links_seed_slugs_existem_no_catalogo():
+    """Todo slug em LINKS_SEED deve existir no catalogo de cursos."""
+    slugs = {c["slug"] for c in CURSOS_SEED}
+    for slug in LINKS_SEED:
+        assert slug in slugs, f"LINKS_SEED referencia slug inexistente: {slug}"
 
 
 @pytest.mark.asyncio

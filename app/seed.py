@@ -36,7 +36,13 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repository.models import Curso, CursoApresentacao, CursoObjecao, CursoTurma
+from app.repository.models import (
+    Curso,
+    CursoApresentacao,
+    CursoLink,
+    CursoObjecao,
+    CursoTurma,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +144,21 @@ TURMAS_SEED: dict[str, list[dict]] = {
             "data_inicio": date(2026, 7, 24),   # 24-25/07/2026
         },
     ],
+}
+
+# ---------------------------------------------------------------------------
+# Links oficiais de inscricao por idioma (texto exato do documento oficial
+# "Harmonização Glútea On-line.docx" — anti-alucinacao). Apenas o curso online
+# possui links de inscricao diretos; presenciais/licenciamento/franquia sao
+# conduzidos por consultor/reuniao (sem link de inscricao automatico).
+# Chave: slug do curso; valor: mapa idioma -> URL.
+# ---------------------------------------------------------------------------
+LINKS_SEED: dict[str, dict[str, str]] = {
+    "curso-online-hg": {
+        "pt": "https://hotmart.com/pt-br/marketplace/produtos/masterclass-de-harmonizacao-glutea-360-online-em-ate-10x/E104665031C?sck=HOTMART_PRODUCT_PAGE",
+        "es": "https://pay.hotmart.com/N95711232T?off=knlbem12",
+        "en": "https://pay.hotmart.com/Q95039051K?off=h9zgo86a",
+    },
 }
 
 
@@ -408,6 +429,27 @@ async def _upsert_objecoes(
         session.add(obj)
 
 
+async def _upsert_links(
+    session: AsyncSession, curso_id: int, links: dict[str, str]
+) -> None:
+    """
+    Upsert de CursoLink por (curso_id, idioma) — ON CONFLICT DO UPDATE.
+    Idempotente: re-executar atualiza a URL se o documento oficial mudar.
+    """
+    for idioma, url in links.items():
+        if not url:
+            continue
+        stmt = (
+            pg_insert(CursoLink)
+            .values(curso_id=curso_id, idioma=idioma, url=url)
+            .on_conflict_do_update(
+                constraint="uq_link_curso_idioma",
+                set_={"url": url},
+            )
+        )
+        await session.execute(stmt)
+
+
 async def _upsert_turmas(
     session: AsyncSession, curso_id: int, turmas: list[dict]
 ) -> None:
@@ -506,6 +548,12 @@ async def run_seed(db_session: AsyncSession) -> None:
             pairs = _parse_objecoes(texto_objecoes)
             await _upsert_objecoes(db_session, curso_id, pairs)
             logger.debug("seed: %d objecoes upserted curso=%s", len(pairs), slug)
+
+        # Links oficiais de inscricao por idioma (curso online)
+        links = LINKS_SEED.get(slug)
+        if links:
+            await _upsert_links(db_session, curso_id, links)
+            logger.debug("seed: %d links upserted curso=%s", len(links), slug)
 
     # Seed de turmas presenciais com datas oficiais
     for slug, turmas in TURMAS_SEED.items():

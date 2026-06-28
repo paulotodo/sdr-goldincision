@@ -19,6 +19,31 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _run_alembic_upgrade() -> None:
+    """
+    Executa 'alembic upgrade head' de forma sincrona (chamado via executor no startup).
+    Idempotente: nao faz nada se o schema ja esta atualizado.
+    """
+    import os
+    import subprocess
+    import sys
+
+    # Resolver o diretorio raiz do projeto (onde alembic.ini esta)
+    proj_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=proj_root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"alembic upgrade head falhou (exit {result.returncode}): {result.stderr[:500]}"
+        )
+
+
 # Estado global dos pools (inicializado no lifespan)
 _engine: Optional[Any] = None
 _session_factory: Optional[Any] = None
@@ -56,6 +81,24 @@ async def lifespan(app: FastAPI):
         logger.info("sdr-whatsapp: pool Postgres inicializado")
     except Exception:
         logger.exception("sdr-whatsapp: falha ao inicializar pool Postgres")
+
+    # Aplicar migracoes (alembic upgrade head) e seed idempotente do catalogo (F4)
+    if _session_factory is not None:
+        try:
+            import asyncio
+
+            await asyncio.get_event_loop().run_in_executor(None, _run_alembic_upgrade)
+            logger.info("sdr-whatsapp: alembic upgrade head concluido")
+        except Exception:
+            logger.exception("sdr-whatsapp: falha no alembic upgrade — continuando")
+
+        try:
+            from app.seed import run_seed
+            async with _session_factory() as _seed_session:
+                await run_seed(_seed_session)
+            logger.info("sdr-whatsapp: seed do catalogo concluido")
+        except Exception:
+            logger.exception("sdr-whatsapp: falha no seed — continuando")
 
     # Inicializar pool Redis (importacao lazy)
     try:

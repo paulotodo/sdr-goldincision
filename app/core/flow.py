@@ -10,6 +10,14 @@ Principios:
 - Identidade "Consultor Virtual Oficial" (FR-013)
 - Blocos curtos, 1 pergunta/msg (FR-015)
 - Mudanca de assunto redireciona imediatamente (Mapa Mestre)
+
+Taxonomia (6 caminhos oficiais do MAPA MESTRE DO ATENDIMENTO):
+  1. Curso Online HG
+  2. Cursos Presenciais HG (HG Modulo 1 e HG360 como sub-fluxos internos)
+  3. Sistema GoldIncision (Licenciamento / Franquia)
+  4. Aluno que precisa de suporte (handoff imediato)
+  5. Paciente modelo (contato da Nidia)
+  6. Outro assunto (handoff imediato)
 """
 from __future__ import annotations
 
@@ -36,34 +44,48 @@ logger = logging.getLogger(__name__)
 
 class CaminhoMapaMestre(IntEnum):
     """
-    Os 6 caminhos do Mapa Mestre de Atendimento GoldIncision.
+    Os 6 caminhos oficiais do Mapa Mestre de Atendimento GoldIncision.
+    Conforme MAPA MESTRE DO ATENDIMENTO.docx.
     """
     CURSO_ONLINE_HG = 1       # Curso Online Harmonizacao Glutea
-    HG_MODULO_1 = 2           # HG Modulo 1 (presencial SP)
-    HG360_SP = 3              # HG360 Sao Paulo (28-30/08/2026)
-    HG360_BARCELONA = 4       # HG360 Barcelona (24-25/07/2026)
+    CURSOS_PRESENCIAIS = 2    # Cursos Presenciais HG (HG Modulo 1 e HG360 como sub-fluxos)
+    SISTEMA_GOLDINCISION = 3  # Licenciamento / Franquia (Sistema GoldIncision)
+    ALUNO_SUPORTE = 4         # Aluno precisa de suporte → handoff imediato
     PACIENTE_MODELO = 5       # Lead quer ser paciente modelo (Nidia)
-    LICENCIAMENTO_FRANQUIA = 6  # Licenciamento / Franquia
+    OUTRO_ASSUNTO = 6         # Outro assunto → handoff imediato
 
 
-# Slugs dos cursos mapeados por caminho
-_CAMINHO_PARA_SLUG: dict[int, str] = {
+# Slugs dos cursos mapeados por sub-caminho dentro de Caminho 2 (presenciais)
+# e Caminho 1 (online) e Caminho 3 (sistema)
+_CAMINHO_PARA_SLUG: dict[int, str | None] = {
     1: "curso-online-hg",
-    2: "hg-modulo-1",
-    3: "hg360-sp",
-    4: "hg360-barcelona",
-    5: None,  # paciente modelo nao tem curso
-    6: "licenciamento-internacional",
+    # Caminho 2: slug resolvido dinamicamente pelo sub-caminho (produto_interesse)
+    2: None,
+    3: "licenciamento-internacional",
+    4: None,   # aluno/suporte: handoff imediato
+    5: None,   # paciente modelo: nao tem curso no catalogo
+    6: None,   # outro assunto: handoff imediato
 }
+
+# Sub-slugs dos presenciais (dentro do Caminho 2)
+_SLUG_HG_MODULO_1 = "hg-modulo-1"
+_SLUG_HG360_SP = "hg360-sp"
+_SLUG_HG360_BARCELONA = "hg360-barcelona"
+
+# Especialidades medicas que qualificam ao HG360 (conforme MAPA MESTRE)
+_ESPECIALIDADES_HG360 = {"dermatologia", "cirurgia plastica", "cirurgia vascular"}
 
 # Etapas finas por caminho
 ETAPA_QUALIF_MEDICO = "qualif_medico"
 ETAPA_QUALIF_EXPERIENCIA = "qualif_experiencia"
+ETAPA_QUALIF_ESPECIALIDADE = "qualif_especialidade"
+ETAPA_ESCOLHA_TURMA = "escolha_turma"
 ETAPA_APRESENTACAO = "apresentacao"
 ETAPA_OBJECAO = "objecao"
 ETAPA_LINK = "link"
 ETAPA_PACIENTE = "paciente_modelo"
-ETAPA_LICENCIAMENTO = "licenciamento_qualif"
+ETAPA_SISTEMA = "sistema_goldincision"
+ETAPA_ALUNO = "aluno_suporte"
 ETAPA_MENU = "menu"
 ETAPA_HANDOFF = "handoff"
 
@@ -212,14 +234,33 @@ class FlowEngine:
         if caminho_ativo == CaminhoMapaMestre.PACIENTE_MODELO:
             return await self._handle_paciente_modelo(context, updates)
 
-        if caminho_ativo == CaminhoMapaMestre.LICENCIAMENTO_FRANQUIA:
-            return await self._handle_licenciamento(
+        if caminho_ativo == CaminhoMapaMestre.ALUNO_SUPORTE:
+            return await self._handle_aluno_suporte(context, updates)
+
+        if caminho_ativo == CaminhoMapaMestre.OUTRO_ASSUNTO:
+            return await self._handle_outro_assunto(context, updates)
+
+        if caminho_ativo == CaminhoMapaMestre.SISTEMA_GOLDINCISION:
+            return await self._handle_sistema_goldincision(
                 context, user_message, updates
             )
 
-        # Caminhos 1-4: requerem elegibilidade medica
-        return await self._handle_curso(
-            caminho_ativo, context, user_message, updates
+        if caminho_ativo == CaminhoMapaMestre.CURSOS_PRESENCIAIS:
+            return await self._handle_cursos_presenciais(
+                context, user_message, updates
+            )
+
+        if caminho_ativo == CaminhoMapaMestre.CURSO_ONLINE_HG:
+            return await self._handle_curso_online(context, user_message, updates)
+
+        # Fallback (caminho desconhecido)
+        menu_text = await self._responder.generate_menu(context.idioma)
+        return FlowResult(
+            response_text=menu_text,
+            action="continue",
+            caminho=None,
+            etapa=ETAPA_MENU,
+            updates=updates,
         )
 
     # ------------------------------------------------------------------
@@ -246,24 +287,97 @@ class FlowEngine:
             updates=updates,
         )
 
-    async def _handle_licenciamento(
+    async def _handle_aluno_suporte(
+        self, context: SessionContext, updates: dict
+    ) -> FlowResult:
+        """
+        Caminho 4: aluno precisa de suporte.
+        Identifica a necessidade e encaminha para equipe responsavel.
+        """
+        updates["caminho_atual"] = CaminhoMapaMestre.ALUNO_SUPORTE
+        updates["etapa_mapa_mestre"] = ETAPA_ALUNO
+
+        if context.idioma == "en":
+            resposta = (
+                "Of course! I will direct your request to our responsible team, "
+                "who will continue your service. If necessary, our team may contact "
+                "you to request additional information.\n\nPlease hold on while I "
+                "connect you with the right person."
+            )
+        elif context.idioma == "es":
+            resposta = (
+                "¡Por supuesto! Voy a dirigir tu solicitud a nuestro equipo responsable, "
+                "que dará continuidad a tu atención. Si es necesario, nuestro equipo "
+                "podrá contactarte para solicitar información adicional."
+            )
+        else:
+            resposta = (
+                "Perfeito! Vou encaminhar sua solicitação para nossa equipe responsável, "
+                "que dará continuidade ao seu atendimento.\n\n"
+                "Caso seja necessário, nossa equipe poderá entrar em contato para "
+                "solicitar informações complementares."
+            )
+
+        return FlowResult(
+            response_text=resposta,
+            action="handoff",
+            caminho=CaminhoMapaMestre.ALUNO_SUPORTE,
+            etapa=ETAPA_ALUNO,
+            updates=updates,
+        )
+
+    async def _handle_outro_assunto(
+        self, context: SessionContext, updates: dict
+    ) -> FlowResult:
+        """
+        Caminho 6: outro assunto.
+        Encaminha para equipe — nao tenta resolver fora da base.
+        """
+        updates["caminho_atual"] = CaminhoMapaMestre.OUTRO_ASSUNTO
+        updates["etapa_mapa_mestre"] = ETAPA_HANDOFF
+
+        if context.idioma == "en":
+            resposta = (
+                "Thank you for your message! I will connect you with our team "
+                "to assist you with this matter."
+            )
+        elif context.idioma == "es":
+            resposta = (
+                "¡Gracias por tu mensaje! Te voy a conectar con nuestro equipo "
+                "para que pueda ayudarte con este tema."
+            )
+        else:
+            resposta = (
+                "Obrigado pela mensagem! Vou conectar você com nossa equipe "
+                "para que possam auxiliá-lo com este assunto."
+            )
+
+        return FlowResult(
+            response_text=resposta,
+            action="handoff",
+            caminho=CaminhoMapaMestre.OUTRO_ASSUNTO,
+            etapa=ETAPA_HANDOFF,
+            updates=updates,
+        )
+
+    async def _handle_sistema_goldincision(
         self, context: SessionContext, user_message: str, updates: dict
     ) -> FlowResult:
         """
-        Caminho 6: licenciamento / franquia.
+        Caminho 3: Sistema GoldIncision (licenciamento / franquia).
         Qualificar interesse e conduzir para reuniao; NUNCA vender diretamente.
         """
         knowledge = await self._load_knowledge(
-            caminho=CaminhoMapaMestre.LICENCIAMENTO_FRANQUIA,
+            caminho=CaminhoMapaMestre.SISTEMA_GOLDINCISION,
             idioma=context.idioma,
         )
 
-        etapa = context.etapa or ETAPA_LICENCIAMENTO
+        etapa = context.etapa or ETAPA_SISTEMA
         history = self._memory.build_messages_for_llm(context, max_msgs=8)
 
         response_text, handoff = await self._responder.generate(
             user_message=user_message,
-            caminho=CaminhoMapaMestre.LICENCIAMENTO_FRANQUIA,
+            caminho=CaminhoMapaMestre.SISTEMA_GOLDINCISION,
             etapa=etapa,
             knowledge_context=knowledge,
             session_history=history,
@@ -271,118 +385,73 @@ class FlowEngine:
             idioma=context.idioma,
         )
 
-        updates["caminho_atual"] = CaminhoMapaMestre.LICENCIAMENTO_FRANQUIA
+        updates["caminho_atual"] = CaminhoMapaMestre.SISTEMA_GOLDINCISION
         updates["etapa_mapa_mestre"] = etapa
         action = "handoff" if handoff else "continue"
 
         return FlowResult(
             response_text=response_text,
             action=action,
-            caminho=CaminhoMapaMestre.LICENCIAMENTO_FRANQUIA,
+            caminho=CaminhoMapaMestre.SISTEMA_GOLDINCISION,
             etapa=etapa,
             updates=updates,
         )
 
-    async def _handle_curso(
+    async def _handle_curso_online(
         self,
-        caminho: int,
         context: SessionContext,
         user_message: str,
         updates: dict,
     ) -> FlowResult:
         """
-        Caminhos 1-4: cursos (online/presenciais).
-        Fluxo: qualif medico → qualif experiencia (presenciais) → apresentacao → link
+        Caminho 1: Curso Online HG.
+        Fluxo: qualif medico → apresentacao → link
         """
-        # Atualizar caminho no contexto e updates
-        context.caminho = caminho
-        updates["caminho_atual"] = caminho
+        context.caminho = CaminhoMapaMestre.CURSO_ONLINE_HG
+        updates["caminho_atual"] = CaminhoMapaMestre.CURSO_ONLINE_HG
 
-        # --- Verificacao de elegibilidade ---
-
-        # Etapa 1: verificar se e medico
-        if context.eh_medico is None:
-            # Ainda nao sabemos se e medico
-            etapa = ETAPA_QUALIF_MEDICO
-            resposta = await self._gerar_pergunta_medico(context.idioma)
-            updates["etapa_mapa_mestre"] = etapa
-            return FlowResult(
-                response_text=resposta,
-                action="continue",
-                caminho=caminho,
-                etapa=etapa,
-                updates=updates,
-            )
-
-        # Verificar resposta sobre ser medico (se estamos na etapa de qualificacao)
+        # Verificar/detectar se e medico (parseando a mensagem ANTES de checar o estado)
         if context.etapa == ETAPA_QUALIF_MEDICO and context.eh_medico is None:
             eh_medico = _detectar_confirmacao(user_message)
             if eh_medico is not None:
                 context.eh_medico = eh_medico
                 updates["eh_medico"] = eh_medico
 
-        # Lead nao e medico → nao elegivel
+        # Etapa: verificar elegibilidade medica
+        if context.eh_medico is None:
+            etapa = ETAPA_QUALIF_MEDICO
+            resposta = await self._gerar_pergunta_medico(context.idioma)
+            updates["etapa_mapa_mestre"] = etapa
+            return FlowResult(
+                response_text=resposta,
+                action="continue",
+                caminho=CaminhoMapaMestre.CURSO_ONLINE_HG,
+                etapa=etapa,
+                updates=updates,
+            )
+
         if context.eh_medico is False:
             resposta = await self._responder.generate_not_eligible(context.idioma)
             updates["etapa_mapa_mestre"] = ETAPA_HANDOFF
             return FlowResult(
                 response_text=resposta,
                 action="handoff",
-                caminho=caminho,
+                caminho=CaminhoMapaMestre.CURSO_ONLINE_HG,
                 etapa=ETAPA_HANDOFF,
                 updates=updates,
             )
 
-        # Etapa 2 (caminhos 2-4): verificar experiencia em Harmonizacao Corporal
-        if caminho in (
-            CaminhoMapaMestre.HG_MODULO_1,
-            CaminhoMapaMestre.HG360_SP,
-            CaminhoMapaMestre.HG360_BARCELONA,
-        ):
-            if context.experiencia_corporal is None:
-                # Verificar se a resposta atual contem essa info
-                exp = _detectar_experiencia_corporal(user_message)
-                if exp is not None:
-                    context.experiencia_corporal = exp
-                    updates["experiencia_corporal"] = exp
-                else:
-                    # Perguntar sobre experiencia
-                    etapa = ETAPA_QUALIF_EXPERIENCIA
-                    resposta = await self._gerar_pergunta_experiencia(
-                        context.idioma, caminho
-                    )
-                    updates["etapa_mapa_mestre"] = etapa
-                    return FlowResult(
-                        response_text=resposta,
-                        action="continue",
-                        caminho=caminho,
-                        etapa=etapa,
-                        updates=updates,
-                    )
-
-            # "apenas facial" ou sem experiencia corporal → nao elegivel (FR-009)
-            if context.experiencia_corporal is False:
-                resposta = await self._gerar_nao_elegivel_experiencia(
-                    context.idioma, caminho
-                )
-                updates["etapa_mapa_mestre"] = ETAPA_HANDOFF
-                return FlowResult(
-                    response_text=resposta,
-                    action="handoff",
-                    caminho=caminho,
-                    etapa=ETAPA_HANDOFF,
-                    updates=updates,
-                )
-
-        # --- Elegivel: carregar base de conhecimento e gerar resposta ---
-        knowledge = await self._load_knowledge(caminho=caminho, idioma=context.idioma)
-
+        # Elegivel: carregar base e gerar resposta
+        knowledge = await self._load_knowledge(
+            caminho=CaminhoMapaMestre.CURSO_ONLINE_HG,
+            idioma=context.idioma,
+        )
         etapa = context.etapa or ETAPA_APRESENTACAO
         history = self._memory.build_messages_for_llm(context, max_msgs=8)
 
         response_text, handoff = await self._responder.generate(
             user_message=user_message,
-            caminho=caminho,
+            caminho=CaminhoMapaMestre.CURSO_ONLINE_HG,
             etapa=etapa,
             knowledge_context=knowledge,
             session_history=history,
@@ -396,10 +465,203 @@ class FlowEngine:
         return FlowResult(
             response_text=response_text,
             action=action,
-            caminho=caminho,
+            caminho=CaminhoMapaMestre.CURSO_ONLINE_HG,
             etapa=etapa,
             updates=updates,
         )
+
+    async def _handle_cursos_presenciais(
+        self,
+        context: SessionContext,
+        user_message: str,
+        updates: dict,
+    ) -> FlowResult:
+        """
+        Caminho 2: Cursos Presenciais HG.
+
+        Sub-fluxo de qualificacao:
+        1. Verificar se e medico (ETAPA_QUALIF_MEDICO)
+        2. Verificar experiencia corporal (ETAPA_QUALIF_EXPERIENCIA)
+           - SIM → elegivel ao HG360 → ir para ETAPA_ESCOLHA_TURMA
+           - NAO → verificar especialidade (ETAPA_QUALIF_ESPECIALIDADE)
+             - Dermatologia / Cirurgia Plastica / Cirurgia Vascular → HG360
+             - Outra / Nao possuo → HG Modulo 1
+        3. Escolha da turma HG360 (SP ou Barcelona) → ETAPA_ESCOLHA_TURMA
+        4. Apresentacao do curso escolhido → ETAPA_APRESENTACAO
+        """
+        context.caminho = CaminhoMapaMestre.CURSOS_PRESENCIAIS
+        updates["caminho_atual"] = CaminhoMapaMestre.CURSOS_PRESENCIAIS
+
+        # --- Detectar respostas na mensagem corrente ANTES de checar estados ---
+
+        # Se estamos pedindo confirmacao de medico, parsear agora
+        if context.etapa == ETAPA_QUALIF_MEDICO and context.eh_medico is None:
+            eh_medico = _detectar_confirmacao(user_message)
+            if eh_medico is not None:
+                context.eh_medico = eh_medico
+                updates["eh_medico"] = eh_medico
+
+        # Se estamos pedindo experiencia corporal, parsear agora
+        if context.etapa == ETAPA_QUALIF_EXPERIENCIA and context.experiencia_corporal is None:
+            exp = _detectar_experiencia_corporal(user_message)
+            if exp is not None:
+                context.experiencia_corporal = exp
+                updates["experiencia_corporal"] = exp
+
+        # Se estamos pedindo especialidade, parsear agora
+        if context.etapa == ETAPA_QUALIF_ESPECIALIDADE and not context.especialidade:
+            especialidade = _detectar_especialidade(user_message)
+            if especialidade is not None:
+                context.especialidade = especialidade
+                updates["especialidade"] = especialidade
+
+        # Se estamos pedindo escolha de turma (HG360 SP vs Barcelona), parsear agora
+        if context.etapa == ETAPA_ESCOLHA_TURMA and not context.produto_interesse:
+            slug_escolhido = _detectar_escolha_turma(user_message)
+            if slug_escolhido:
+                context.produto_interesse = slug_escolhido
+                updates["produto_interesse"] = slug_escolhido
+
+        # --- Fluxo de qualificacao ---
+
+        # Etapa 1: verificar se e medico
+        if context.eh_medico is None:
+            etapa = ETAPA_QUALIF_MEDICO
+            resposta = await self._gerar_pergunta_medico(context.idioma)
+            updates["etapa_mapa_mestre"] = etapa
+            return FlowResult(
+                response_text=resposta,
+                action="continue",
+                caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+                etapa=etapa,
+                updates=updates,
+            )
+
+        # Lead nao e medico → nao elegivel (FR-009)
+        if context.eh_medico is False:
+            resposta = await self._responder.generate_not_eligible(context.idioma)
+            updates["etapa_mapa_mestre"] = ETAPA_HANDOFF
+            return FlowResult(
+                response_text=resposta,
+                action="handoff",
+                caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+                etapa=ETAPA_HANDOFF,
+                updates=updates,
+            )
+
+        # Etapa 2: verificar experiencia em Harmonizacao Corporal
+        if context.experiencia_corporal is None:
+            etapa = ETAPA_QUALIF_EXPERIENCIA
+            resposta = await self._gerar_pergunta_experiencia(context.idioma)
+            updates["etapa_mapa_mestre"] = etapa
+            return FlowResult(
+                response_text=resposta,
+                action="continue",
+                caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+                etapa=etapa,
+                updates=updates,
+            )
+
+        # Sem experiencia corporal → verificar especialidade para determinar HG360 ou Modulo 1
+        if context.experiencia_corporal is False and not context.especialidade:
+            etapa = ETAPA_QUALIF_ESPECIALIDADE
+            resposta = await self._gerar_pergunta_especialidade(context.idioma)
+            updates["etapa_mapa_mestre"] = etapa
+            return FlowResult(
+                response_text=resposta,
+                action="continue",
+                caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+                etapa=etapa,
+                updates=updates,
+            )
+
+        # Determinar sub-curso com base em experiencia + especialidade
+        if not context.produto_interesse:
+            slug_recomendado = self._recomendar_sub_curso(context)
+            if slug_recomendado in (_SLUG_HG360_SP, _SLUG_HG360_BARCELONA):
+                # Elegivel ao HG360: perguntar turma (SP ou Barcelona)
+                if context.etapa != ETAPA_ESCOLHA_TURMA:
+                    etapa = ETAPA_ESCOLHA_TURMA
+                    resposta = await self._gerar_pergunta_escolha_turma(context.idioma)
+                    updates["etapa_mapa_mestre"] = etapa
+                    return FlowResult(
+                        response_text=resposta,
+                        action="continue",
+                        caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+                        etapa=etapa,
+                        updates=updates,
+                    )
+                # Turma ainda nao escolhida: aguardar resposta
+                if not context.produto_interesse:
+                    etapa = ETAPA_ESCOLHA_TURMA
+                    resposta = await self._gerar_pergunta_escolha_turma(context.idioma)
+                    updates["etapa_mapa_mestre"] = etapa
+                    return FlowResult(
+                        response_text=resposta,
+                        action="continue",
+                        caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+                        etapa=etapa,
+                        updates=updates,
+                    )
+            else:
+                # HG Modulo 1
+                context.produto_interesse = _SLUG_HG_MODULO_1
+                updates["produto_interesse"] = _SLUG_HG_MODULO_1
+
+        # Apresentar o sub-curso escolhido
+        slug = context.produto_interesse or _SLUG_HG_MODULO_1
+        knowledge = await self._load_knowledge_by_slug(slug=slug, idioma=context.idioma)
+        etapa = context.etapa or ETAPA_APRESENTACAO
+        history = self._memory.build_messages_for_llm(context, max_msgs=8)
+
+        # Mapear slug para numero de caminho interno (para o responder)
+        caminho_responder = {
+            _SLUG_HG_MODULO_1: 2,
+            _SLUG_HG360_SP: 3,
+            _SLUG_HG360_BARCELONA: 4,
+        }.get(slug, 2)
+
+        response_text, handoff = await self._responder.generate(
+            user_message=user_message,
+            caminho=caminho_responder,
+            etapa=etapa,
+            knowledge_context=knowledge,
+            session_history=history,
+            session_summary=context.resumo_rolante,
+            idioma=context.idioma,
+        )
+
+        updates["etapa_mapa_mestre"] = ETAPA_APRESENTACAO
+        action = "handoff" if handoff else "continue"
+
+        return FlowResult(
+            response_text=response_text,
+            action=action,
+            caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+            etapa=ETAPA_APRESENTACAO,
+            updates=updates,
+        )
+
+    def _recomendar_sub_curso(self, context: SessionContext) -> str:
+        """
+        Determina o sub-curso recomendado com base em experiencia e especialidade.
+
+        Regras do Mapa Mestre:
+        - Experiencia corporal SIM → HG360 (escolha de turma pendente)
+        - Experiencia corporal NAO + especialidade qualificante → HG360
+        - Experiencia corporal NAO + especialidade nao qualificante → HG Modulo 1
+        """
+        if context.experiencia_corporal:
+            # Experiencia corporal confirmada → elegivel ao HG360
+            return _SLUG_HG360_SP  # default; turma sera escolhida depois
+
+        # Sem experiencia corporal: verificar especialidade
+        esp = (context.especialidade or "").lower().strip()
+        for esp_qualif in _ESPECIALIDADES_HG360:
+            if esp_qualif in esp:
+                return _SLUG_HG360_SP  # especialidade qualificante → HG360
+        # Especialidade nao qualificante ou nao informada
+        return _SLUG_HG_MODULO_1
 
     # ------------------------------------------------------------------
     # Carregamento de conhecimento do banco
@@ -408,20 +670,26 @@ class FlowEngine:
     async def _load_knowledge(self, caminho: int, idioma: str) -> str:
         """
         Carrega base de conhecimento do banco para o caminho e idioma.
-
-        Hierarquia: Apresentacao + Objecoes (por idioma).
+        Para Caminho 2 (presenciais), usar _load_knowledge_by_slug com o slug especifico.
         """
         slug = _CAMINHO_PARA_SLUG.get(caminho)
         if slug is None:
             return ""
+        return await self._load_knowledge_by_slug(slug=slug, idioma=idioma)
 
+    async def _load_knowledge_by_slug(self, slug: str, idioma: str) -> str:
+        """
+        Carrega base de conhecimento do banco para o slug especifico e idioma.
+
+        Hierarquia: Apresentacao + Objecoes (por idioma) + Turmas + Links.
+        """
         # Buscar curso pelo slug
         stmt_curso = select(Curso).where(Curso.slug == slug, Curso.ativo.is_(True))
         result = await self._db.execute(stmt_curso)
         curso = result.scalar_one_or_none()
         if curso is None:
             logger.warning(
-                "flow: curso nao encontrado slug=%s caminho=%s", slug, caminho
+                "flow: curso nao encontrado slug=%s", slug
             )
             return ""
 
@@ -528,52 +796,82 @@ class FlowEngine:
                 "você é médico com CRM ativo? 🩺"
             )
 
-    async def _gerar_pergunta_experiencia(self, idioma: str, caminho: int) -> str:
+    async def _gerar_pergunta_experiencia(self, idioma: str) -> str:
         """Pergunta sobre experiencia em harmonizacao corporal (nao facial)."""
         if idioma == "en":
             return (
-                "To access this advanced course, we need to verify: "
+                "To indicate the most suitable training for you, I need to verify: "
                 "do you have experience in Corporal Harmonization or gluteal fillers? "
                 "(facial experience alone does not qualify) 💉"
             )
         elif idioma == "es":
             return (
-                "Para acceder a este curso avanzado, necesitamos verificar: "
+                "Para indicarte la formación más adecuada, necesito verificar: "
                 "¿tienes experiencia en Armonización Corporal o rellenos glúteos? "
                 "(la experiencia solo facial no es suficiente) 💉"
             )
         else:
             return (
-                "Para acessar este curso avançado, precisamos verificar: "
-                "você tem experiência em Harmonização Corporal ou preenchimento de glúteo? "
+                "Para indicar a formação mais adequada ao seu momento profissional: "
+                "você já atua com Harmonização Corporal ou preenchimento de glúteo? "
                 "(experiência apenas facial não conta) 💉"
             )
 
-    async def _gerar_nao_elegivel_experiencia(self, idioma: str, caminho: int) -> str:
-        """Lead nao tem experiencia corporal: nao elegivel para presenciais avancados."""
+    async def _gerar_pergunta_especialidade(self, idioma: str) -> str:
+        """Pergunta sobre especialidade medica para determinar elegibilidade ao HG360."""
         if idioma == "en":
             return (
-                "Thank you for your interest! 🙏\n\n"
-                "This advanced presential course requires prior experience in "
-                "Corporal Harmonization or gluteal fillers.\n\n"
-                "I recommend starting with our Online Course in Gluteal Harmonization "
-                "to build the foundational knowledge. Would you like to know more about it?"
+                "To direct you to the most suitable course, could you tell me: "
+                "what is your medical specialty?\n"
+                "• Dermatology\n"
+                "• Plastic Surgery\n"
+                "• Vascular Surgery\n"
+                "• Other specialty\n"
+                "• I don't have a specialty"
             )
         elif idioma == "es":
             return (
-                "¡Gracias por tu interés! 🙏\n\n"
-                "Este curso presencial avanzado requiere experiencia previa en "
-                "Armonización Corporal o rellenos glúteos.\n\n"
-                "Te recomiendo comenzar con nuestro Curso Online de Armonización Glútea "
-                "para construir la base necesaria. ¿Te gustaría saber más?"
+                "Para dirigirte al curso más adecuado, ¿podrías decirme "
+                "tu especialidad médica?\n"
+                "• Dermatología\n"
+                "• Cirugía Plástica\n"
+                "• Cirugía Vascular\n"
+                "• Otra especialidad\n"
+                "• No tengo especialidad"
             )
         else:
             return (
-                "Obrigado pelo interesse! 🙏\n\n"
-                "Este curso presencial avançado exige experiência prévia em "
-                "Harmonização Corporal ou preenchimento de glúteo.\n\n"
-                "Recomendo começar pelo nosso Curso Online de Harmonização Glútea "
-                "para construir a base necessária. Gostaria de saber mais?"
+                "Para indicar a formação mais adequada ao seu perfil, "
+                "poderia me informar sua especialidade médica?\n"
+                "• Dermatologia\n"
+                "• Cirurgia Plástica\n"
+                "• Cirurgia Vascular\n"
+                "• Outra especialidade\n"
+                "• Não possuo especialidade"
+            )
+
+    async def _gerar_pergunta_escolha_turma(self, idioma: str) -> str:
+        """Pergunta sobre escolha da turma HG360 (SP ou Barcelona)."""
+        if idioma == "en":
+            return (
+                "We currently have two HG360 sessions available. "
+                "Which one interests you most?\n\n"
+                "1️⃣ São Paulo – August 28-30, 2026\n"
+                "2️⃣ Barcelona – July 24-25, 2026"
+            )
+        elif idioma == "es":
+            return (
+                "Actualmente tenemos dos grupos del HG360 disponibles. "
+                "¿Cuál te interesa más?\n\n"
+                "1️⃣ São Paulo – 28 a 30/08/2026\n"
+                "2️⃣ Barcelona – 24 y 25/07/2026"
+            )
+        else:
+            return (
+                "Atualmente temos duas turmas disponíveis do HG360. "
+                "Qual delas desperta mais o seu interesse?\n\n"
+                "1️⃣ São Paulo – 28 a 30/08/2026\n"
+                "2️⃣ Barcelona – 24 e 25/07/2026"
             )
 
 
@@ -645,4 +943,59 @@ def _detectar_experiencia_corporal(texto: str) -> Optional[bool]:
     for pos in positivos:
         if pos in t:
             return True
+    return None
+
+
+def _detectar_especialidade(texto: str) -> Optional[str]:
+    """
+    Detecta especialidade medica no texto.
+    Retorna string normalizada ou None se nao detectado.
+    """
+    t = texto.lower().strip()
+
+    mapeamento = [
+        (["dermatolog"], "dermatologia"),
+        (["cirurgia plastica", "cirugia plastica", "plastic surgery", "plastica"], "cirurgia plastica"),
+        (["cirurgia vascular", "vascular surgery", "vascular"], "cirurgia vascular"),
+    ]
+
+    for termos, especialidade in mapeamento:
+        for termo in termos:
+            if termo in t:
+                return especialidade
+
+    # Indicadores de "nao possuo especialidade" ou outra
+    sem_especialidade = [
+        "nao possuo", "não possuo", "sem especialidade", "nenhuma",
+        "outra", "geral", "clinico", "clinica",
+        "no tengo", "no specialty", "other",
+    ]
+    for termo in sem_especialidade:
+        if termo in t:
+            return "outra"
+
+    return None
+
+
+def _detectar_escolha_turma(texto: str) -> Optional[str]:
+    """
+    Detecta escolha de turma HG360 (SP ou Barcelona) no texto.
+    Retorna slug do sub-curso ou None se nao detectado.
+    """
+    t = texto.lower().strip()
+
+    # Barcelona
+    if any(k in t for k in ["barcelona", "espanha", "spain", "españa", "julho", "july", "julio"]):
+        return _SLUG_HG360_BARCELONA
+
+    # Sao Paulo
+    if any(k in t for k in ["sao paulo", "são paulo", "sp", "brasil", "brazil", "agosto", "august"]):
+        return _SLUG_HG360_SP
+
+    # Numeros do menu
+    if "1" in t or "um" in t or "one" in t or "uno" in t:
+        return _SLUG_HG360_SP
+    if "2" in t or "dois" in t or "two" in t or "dos" in t:
+        return _SLUG_HG360_BARCELONA
+
     return None

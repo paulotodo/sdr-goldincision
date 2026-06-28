@@ -56,24 +56,42 @@ Fluxo: apresentar o curso → enviar link de inscrição no idioma correto.
 """
 
 _SYSTEM_CAMINHO_2 = """
-CAMINHO ATIVO: HG Módulo 1 (Presencial)
-Qualificação: é médico? → tem experiência em Harmonização Corporal ou preenchimento de glúteo? (facial NÃO conta).
-Se sim às duas: apresentar o curso e as trilhas disponíveis (HG Módulo 1 / HG360 SP / Barcelona).
-Se não tem experiência corporal: NÃO é elegível para HG Módulo 1.
+CAMINHO ATIVO: Cursos Presenciais de Harmonização Glútea
+Inclui: HG Módulo 1, HG360 São Paulo (28-30/08/2026) e HG360 Barcelona (24-25/07/2026).
+Qualificação obrigatória: médico com CRM ativo.
+Sub-rota: experiência em Harmonização Corporal ou glúteo → HG360. Sem experiência corporal → verificar especialidade → HG360 ou HG Módulo 1.
+"""
+
+# Caminhos internos para o responder ao processar sub-fluxos de presenciais
+_SYSTEM_CAMINHO_2_HG_MODULO_1 = """
+CAMINHO ATIVO: HG Módulo 1 (Presencial São Paulo)
+Curso presencial para médicos iniciantes em Harmonização Corporal.
+Apresentar o curso com base nos dados oficiais. Convidar para inscrição com consultor.
+"""
+
+_SYSTEM_CAMINHO_2_HG360_SP = """
+CAMINHO ATIVO: HG360 São Paulo (28-30/08/2026)
+Curso avançado presencial em São Paulo.
+Apresentar o curso com base nos dados oficiais. Convidar para inscrição com consultor.
+"""
+
+_SYSTEM_CAMINHO_2_HG360_BCN = """
+CAMINHO ATIVO: HG360 Barcelona (24-25/07/2026)
+Curso avançado presencial em Barcelona.
+Apresentar o curso com base nos dados oficiais. Convidar para inscrição com consultor.
 """
 
 _SYSTEM_CAMINHO_3 = """
-CAMINHO ATIVO: HG360 São Paulo (28-30/08/2026)
-Qualificação: é médico? → tem experiência em Harmonização Corporal ou preenchimento de glúteo?
-Se sim: apresentar HG360 SP com datas e detalhes.
-Se não tem experiência corporal: não é elegível para o presencial avançado.
+CAMINHO ATIVO: Sistema GoldIncision (Licenciamento / Franquia)
+Importante: a técnica GoldIncision NÃO é um curso avulso — é um sistema de licenciamento.
+Qualificar o interesse (licenciamento ou franquia) e conduzir para reunião de apresentação.
+NUNCA tente "vender" ou fechar diretamente — o objetivo é marcar a reunião.
 """
 
 _SYSTEM_CAMINHO_4 = """
-CAMINHO ATIVO: HG360 Barcelona (24-25/07/2026)
-Qualificação: é médico? → tem experiência em Harmonização Corporal ou preenchimento de glúteo?
-Se sim: apresentar HG360 Barcelona com datas e detalhes.
-Se não tem experiência corporal: não é elegível.
+CAMINHO ATIVO: Aluno Precisa de Suporte
+O lead é aluno e precisa de suporte (acesso, certificado, pagamento ou dúvidas).
+Coletar a necessidade e encaminhar para a equipe responsável.
 """
 
 _SYSTEM_CAMINHO_5 = """
@@ -84,10 +102,9 @@ Não responda sobre vagas, seleção, critérios ou procedimentos. APENAS o cont
 """
 
 _SYSTEM_CAMINHO_6 = """
-CAMINHO ATIVO: Licenciamento / Franquia (Sistema GoldIncision)
-Importante: a técnica GoldIncision NÃO é um curso avulso — é um sistema de licenciamento.
-Qualificar o interesse (licenciamento ou franquia) e conduzir para reunião de apresentação.
-NUNCA tente "vender" ou fechar diretamente — o objetivo é marcar a reunião.
+CAMINHO ATIVO: Outro Assunto
+O assunto não se encaixa nos demais caminhos.
+Agradecer e encaminhar para a equipe. NUNCA inventar informações fora da base.
 """
 
 _SYSTEM_MENU = """
@@ -216,45 +233,49 @@ class GroundedResponder:
     async def generate_menu(self, idioma: str = "pt") -> str:
         """
         Gera o menu inicial de 6 opcoes no idioma correto.
+        Fiel ao MAPA MESTRE DO ATENDIMENTO.docx (6 caminhos oficiais).
         Nao usa LLM — texto fixo estruturado (anti-alucinacao).
         """
         if idioma == "en":
             return (
                 "Hello! I'm the Official Virtual Consultant of GoldIncision. "
-                "How can I help you today?\n\n"
-                "Please choose an option:\n"
+                "I'm here to help you find the most suitable training or service "
+                "for your needs.\n\n"
+                "How can I help you today?\n"
                 "1️⃣ Online Course — Gluteal Harmonization\n"
-                "2️⃣ HG Module 1 (Presential — São Paulo)\n"
-                "3️⃣ HG360 São Paulo (Aug 28-30, 2026)\n"
-                "4️⃣ HG360 Barcelona (Jul 24-25, 2026)\n"
-                "5️⃣ I want to be a model patient\n"
-                "6️⃣ Licensing / Franchise (GoldIncision System)\n\n"
+                "2️⃣ Presential Courses — Gluteal Harmonization (HG Module 1 / HG360)\n"
+                "3️⃣ GoldIncision System (Licensing or Franchise)\n"
+                "4️⃣ I'm a student and need support\n"
+                "5️⃣ I'm a model patient and need information\n"
+                "6️⃣ Other subject\n\n"
                 "Just type the number or describe what you're looking for. 😊"
             )
         elif idioma == "es":
             return (
                 "¡Hola! Soy el Consultor Virtual Oficial de GoldIncision. "
-                "¿En qué puedo ayudarte?\n\n"
-                "Elige una opción:\n"
+                "Estoy aquí para ayudarte a encontrar la formación o el servicio "
+                "más adecuado para tus necesidades.\n\n"
+                "¿Cómo puedo ayudarte?\n"
                 "1️⃣ Curso Online — Armonización Glútea\n"
-                "2️⃣ HG Módulo 1 (Presencial — São Paulo)\n"
-                "3️⃣ HG360 São Paulo (28-30/08/2026)\n"
-                "4️⃣ HG360 Barcelona (24-25/07/2026)\n"
-                "5️⃣ Quiero ser paciente modelo\n"
-                "6️⃣ Licenciamiento / Franquicia (Sistema GoldIncision)\n\n"
+                "2️⃣ Cursos Presenciales — Armonización Glútea (HG Módulo 1 / HG360)\n"
+                "3️⃣ Sistema GoldIncision (Licenciamiento o Franquicia)\n"
+                "4️⃣ Soy alumno y necesito soporte\n"
+                "5️⃣ Soy paciente modelo y necesito información\n"
+                "6️⃣ Otro asunto\n\n"
                 "Escribe el número o describe lo que buscas. 😊"
             )
         else:  # pt default
             return (
-                "Olá! Sou o Consultor Virtual Oficial da GoldIncision. "
-                "Como posso ajudá-lo?\n\n"
-                "Escolha uma opção:\n"
-                "1️⃣ Curso Online — Harmonização Glútea\n"
-                "2️⃣ HG Módulo 1 (Presencial — São Paulo)\n"
-                "3️⃣ HG360 São Paulo (28-30/08/2026)\n"
-                "4️⃣ HG360 Barcelona (24-25/07/2026)\n"
-                "5️⃣ Quero ser paciente modelo\n"
-                "6️⃣ Licenciamento / Franquia (Sistema GoldIncision)\n\n"
+                "Olá! Sou o Consultor Oficial da GoldIncision e estou aqui para "
+                "ajudá-lo a encontrar a formação ou o atendimento mais adequado "
+                "às suas necessidades.\n\n"
+                "Como posso ajudá-lo hoje?\n"
+                "1️⃣ Curso Online de Harmonização Glútea\n"
+                "2️⃣ Cursos Presenciais de Harmonização Glútea\n"
+                "3️⃣ Sistema GoldIncision (Licenciamento ou Franquia)\n"
+                "4️⃣ Sou aluno e preciso de suporte\n"
+                "5️⃣ Sou paciente modelo e preciso de informações\n"
+                "6️⃣ Outro assunto\n\n"
                 "Digite o número ou descreva o que procura. 😊"
             )
 

@@ -6,6 +6,14 @@ Usa o modelo barato (gpt-4o-mini) para:
 - Detectar idioma (pt/en/es)
 - Decidir entre entrada direta no fluxo (intencao clara) ou menu de 6 opcoes
 
+Taxonomia (6 caminhos oficiais do MAPA MESTRE DO ATENDIMENTO):
+  1. Curso Online HG
+  2. Cursos Presenciais HG (HG Modulo 1 e HG360 como sub-fluxos internos)
+  3. Sistema GoldIncision (Licenciamento / Franquia)
+  4. Aluno que precisa de suporte
+  5. Paciente modelo
+  6. Outro assunto
+
 Principios (FR-007):
 - Intencao clara → entra diretamente no caminho (sem reapresentar menu)
 - Intencao ambigua → menu de 6 opcoes
@@ -33,21 +41,25 @@ Analise a mensagem do usuário e retorne um JSON com EXATAMENTE estas chaves:
 }
 
 Valores válidos para "intencao":
-- "curso_online"           — quer informações do Curso Online de Harmonização Glútea
-- "hg_modulo_1"           — quer informações do HG Módulo 1 (presencial)
-- "hg360_sp"              — quer informações do HG360 São Paulo (28-30/08/2026)
-- "hg360_barcelona"       — quer informações do HG360 Barcelona (24-25/07/2026)
-- "paciente_modelo"       — quer ser paciente modelo / fazer procedimento
-- "licenciamento_franquia" — quer licenciamento ou franquia (Sistema GoldIncision)
-- "ambigua"               — nao e possivel determinar a intenção com clareza
+- "curso_online"          — quer informações do Curso Online de Harmonização Glútea
+- "cursos_presenciais"    — quer informações de qualquer curso presencial de HG
+                            (HG Módulo 1, HG360 SP, HG360 Barcelona ou presencial em geral)
+- "sistema_goldincision"  — quer informações sobre Licenciamento ou Franquia GoldIncision
+- "aluno_suporte"         — é aluno e precisa de suporte (acesso, certificado, pagamento, dúvidas)
+- "paciente_modelo"       — quer ser paciente modelo ou fazer procedimento
+- "outro_assunto"         — assunto que não se encaixa nas categorias acima
+- "ambigua"               — não é possível determinar a intenção com clareza
 
 Valores válidos para "idioma": "pt", "en", "es"
 Valores válidos para "confianca": "alta" (intenção inequívoca), "baixa" (dúvida)
 
 Regras:
-- Se o lead menciona preço, inscrição, data ou local de um curso específico → confiança alta
-- Se o lead menciona "paciente", "procedimento", "aplicar", "fazer" → paciente_modelo
-- Se o lead menciona "licença", "licenciar", "franquia", "sistema", "tecnologia" → licenciamento_franquia
+- Se o lead menciona preço, inscrição, data ou local de qualquer curso presencial
+  (HG Módulo 1, HG360, São Paulo, Barcelona) → "cursos_presenciais" com confiança alta
+- Se o lead menciona curso online de harmonização → "curso_online" com confiança alta
+- Se o lead menciona "licença", "licenciar", "franquia", "sistema", "tecnologia GoldIncision" → "sistema_goldincision"
+- Se o lead menciona "suporte", "aluno", "acesso", "certificado", "não consigo acessar" → "aluno_suporte"
+- Se o lead menciona "paciente", "procedimento", "aplicar", "fazer" → "paciente_modelo"
 - Se ambíguo → "ambigua" com confiança "baixa"
 - Retorne APENAS o JSON, sem texto adicional.
 """
@@ -61,22 +73,22 @@ class Idioma(str, Enum):
 
 class ClassificacaoIntencao(str, Enum):
     CURSO_ONLINE = "curso_online"
-    HG_MODULO_1 = "hg_modulo_1"
-    HG360_SP = "hg360_sp"
-    HG360_BARCELONA = "hg360_barcelona"
+    CURSOS_PRESENCIAIS = "cursos_presenciais"
+    SISTEMA_GOLDINCISION = "sistema_goldincision"
+    ALUNO_SUPORTE = "aluno_suporte"
     PACIENTE_MODELO = "paciente_modelo"
-    LICENCIAMENTO_FRANQUIA = "licenciamento_franquia"
+    OUTRO_ASSUNTO = "outro_assunto"
     AMBIGUA = "ambigua"   # Menu de 6 opcoes
 
 
-# Mapeamento de intencao → caminho do Mapa Mestre
+# Mapeamento de intencao → caminho do Mapa Mestre (oficial)
 INTENCAO_PARA_CAMINHO: dict[ClassificacaoIntencao, int] = {
     ClassificacaoIntencao.CURSO_ONLINE: 1,
-    ClassificacaoIntencao.HG_MODULO_1: 2,
-    ClassificacaoIntencao.HG360_SP: 3,
-    ClassificacaoIntencao.HG360_BARCELONA: 4,
+    ClassificacaoIntencao.CURSOS_PRESENCIAIS: 2,
+    ClassificacaoIntencao.SISTEMA_GOLDINCISION: 3,
+    ClassificacaoIntencao.ALUNO_SUPORTE: 4,
     ClassificacaoIntencao.PACIENTE_MODELO: 5,
-    ClassificacaoIntencao.LICENCIAMENTO_FRANQUIA: 6,
+    ClassificacaoIntencao.OUTRO_ASSUNTO: 6,
 }
 
 

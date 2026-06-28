@@ -62,29 +62,30 @@ async def test_intencao_clara_curso_online():
 
 
 @pytest.mark.asyncio
-async def test_intencao_clara_hg360_sp():
-    """Intencao clara para HG360 SP."""
+async def test_intencao_clara_cursos_presenciais():
+    """Intencao clara para cursos presenciais (HG360 SP, HG360 Barcelona, HG Modulo 1)."""
     client = MockOpenAIClient(
-        response_json={"intencao": "hg360_sp", "idioma": "pt", "confianca": "alta"}
+        response_json={"intencao": "cursos_presenciais", "idioma": "pt", "confianca": "alta"}
     )
     classifier = IntentClassifier(client)
 
-    intencao, idioma = await classifier.classify("Preciso de informações sobre o HG360 em São Paulo")
+    intencao, idioma = await classifier.classify("Preciso de informacoes sobre o HG360 em Sao Paulo")
 
-    assert intencao == ClassificacaoIntencao.HG360_SP
+    assert intencao == ClassificacaoIntencao.CURSOS_PRESENCIAIS
+    assert idioma == Idioma.PT
 
 
 @pytest.mark.asyncio
-async def test_intencao_clara_barcelona():
-    """Intencao clara para HG360 Barcelona."""
+async def test_intencao_clara_presencial_barcelona_retorna_cursos_presenciais():
+    """Barcelona e um sub-fluxo de cursos_presenciais — classificado como CURSOS_PRESENCIAIS."""
     client = MockOpenAIClient(
-        response_json={"intencao": "hg360_barcelona", "idioma": "es", "confianca": "alta"}
+        response_json={"intencao": "cursos_presenciais", "idioma": "es", "confianca": "alta"}
     )
     classifier = IntentClassifier(client)
 
-    intencao, idioma = await classifier.classify("Información sobre el curso en Barcelona")
+    intencao, idioma = await classifier.classify("Informacion sobre el curso en Barcelona")
 
-    assert intencao == ClassificacaoIntencao.HG360_BARCELONA
+    assert intencao == ClassificacaoIntencao.CURSOS_PRESENCIAIS
     assert idioma == Idioma.ES
 
 
@@ -174,14 +175,17 @@ async def test_json_invalido_retorna_ambigua():
 # ---------------------------------------------------------------------------
 
 def test_mapeamento_intencao_para_caminho():
-    """Todas as intencoes claras mapeiam para caminhos validos 1-6."""
+    """
+    Todas as intencoes claras mapeiam para caminhos validos 1-6.
+    Taxonomia fiel ao MAPA MESTRE DO ATENDIMENTO.docx (6 caminhos oficiais).
+    """
     mapa = {
         ClassificacaoIntencao.CURSO_ONLINE: 1,
-        ClassificacaoIntencao.HG_MODULO_1: 2,
-        ClassificacaoIntencao.HG360_SP: 3,
-        ClassificacaoIntencao.HG360_BARCELONA: 4,
+        ClassificacaoIntencao.CURSOS_PRESENCIAIS: 2,    # HG Modulo 1 + HG360 SP + HG360 Barcelona
+        ClassificacaoIntencao.SISTEMA_GOLDINCISION: 3,  # Licenciamento / Franquia
+        ClassificacaoIntencao.ALUNO_SUPORTE: 4,
         ClassificacaoIntencao.PACIENTE_MODELO: 5,
-        ClassificacaoIntencao.LICENCIAMENTO_FRANQUIA: 6,
+        ClassificacaoIntencao.OUTRO_ASSUNTO: 6,
     }
     for intencao, esperado in mapa.items():
         assert INTENCAO_PARA_CAMINHO[intencao] == esperado
@@ -198,8 +202,11 @@ def test_ambigua_nao_tem_caminho():
 
 def test_parse_intencao_valores_validos():
     assert _parse_intencao("curso_online") == ClassificacaoIntencao.CURSO_ONLINE
-    assert _parse_intencao("hg360_barcelona") == ClassificacaoIntencao.HG360_BARCELONA
+    assert _parse_intencao("cursos_presenciais") == ClassificacaoIntencao.CURSOS_PRESENCIAIS
+    assert _parse_intencao("sistema_goldincision") == ClassificacaoIntencao.SISTEMA_GOLDINCISION
+    assert _parse_intencao("aluno_suporte") == ClassificacaoIntencao.ALUNO_SUPORTE
     assert _parse_intencao("paciente_modelo") == ClassificacaoIntencao.PACIENTE_MODELO
+    assert _parse_intencao("outro_assunto") == ClassificacaoIntencao.OUTRO_ASSUNTO
 
 
 def test_parse_intencao_valor_invalido():

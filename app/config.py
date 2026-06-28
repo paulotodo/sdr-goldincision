@@ -2,11 +2,17 @@
 Configuracoes da aplicacao via Pydantic-settings.
 Todos os valores sensiveis sao lidos de env vars ou Docker secrets.
 NUNCA hardcodar secrets neste arquivo.
+
+Docker secrets: stack.yml monta secrets em /run/secrets/ e seta
+*_FILE env vars apontando para o caminho. model_post_init le esses
+arquivos e preenche os campos correspondentes (FR-032).
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
-from typing import Optional
+from pathlib import Path
+from typing import Any, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -77,6 +83,30 @@ class Settings(BaseSettings):
     @classmethod
     def validate_admin_token(cls, v: str) -> str:
         return v
+
+    def model_post_init(self, __context: Any) -> None:
+        """
+        Le secrets via convencao *_FILE (Docker secrets).
+
+        Quando stack.yml seta OPENAI_API_KEY_FILE=/run/secrets/openai_api_key,
+        le o arquivo e substitui o campo correspondente (tem prioridade sobre env).
+        Campos: admin_token, openai_api_key, chatmaster_token, webhook_token.
+        """
+        _secret_fields: dict[str, str] = {
+            "admin_token": "ADMIN_TOKEN_FILE",
+            "openai_api_key": "OPENAI_API_KEY_FILE",
+            "chatmaster_token": "CHATMASTER_TOKEN_FILE",
+            "webhook_token": "WEBHOOK_TOKEN_FILE",
+        }
+        for field_name, env_var in _secret_fields.items():
+            file_path = os.environ.get(env_var)
+            if not file_path:
+                continue
+            p = Path(file_path)
+            if p.is_file():
+                content = p.read_text(encoding="utf-8").strip()
+                if content:
+                    object.__setattr__(self, field_name, content)
 
 
 @lru_cache(maxsize=1)

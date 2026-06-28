@@ -4,12 +4,20 @@ Testes de integracao e2e — FASE 8 (tasks 8.1.1 a 8.1.4).
 Cobre os 14 cenarios do quickstart.md e testes de contrato/anti-drift.
 Todos os servicos externos (OpenAI, ChatMaster, Postgres, Redis) sao mockados.
 
+Taxonomia fiel ao MAPA MESTRE DO ATENDIMENTO.docx (6 caminhos oficiais):
+  1. curso_online          → Caminho 1
+  2. cursos_presenciais    → Caminho 2 (HG Modulo 1 / HG360 SP / HG360 Barcelona
+                             como sub-fluxos internos do mesmo caminho)
+  3. sistema_goldincision  → Caminho 3 (Licenciamento / Franquia)
+  4. aluno_suporte         → Caminho 4 (handoff imediato)
+  5. paciente_modelo       → Caminho 5 (contato da Nidia)
+  6. outro_assunto         → Caminho 6 (handoff imediato)
+
 Sobre fixtures de infra efemera (8.1.1):
   Para execucao local/CI sem deps externas, usamos mocks em memoria.
   Para CI com Postgres/Redis efemeros reais, instalar:
     pip install testcontainers[postgres,redis]
-  e definir PYTEST_USE_TESTCONTAINERS=1. Quando a variavel nao esta
-  setada, as fixtures de DB/Redis sao sempre mocks (zero deps externas).
+  e definir PYTEST_USE_TESTCONTAINERS=1.
 
 Cenarios cobertos:
   1.  Intencao clara → sem requalificacao (SC-001)
@@ -28,6 +36,7 @@ Cenarios cobertos:
   13. Roundtrip end-to-end — exemplos reais de knowledge_base (8.1.2)
   14. Empacotamento — inspecao de stack.yml (SC-006, US6)
   (8.1.4) Rate limiting / teto de gasto LLM (SEC-WH-3)
+  (F8)   E2e webhook→FlowEngine real — falha se engine desconectado
 """
 from __future__ import annotations
 
@@ -110,6 +119,7 @@ def _post_webhook(client: TestClient, payload: dict, headers: Optional[dict] = N
 
 # ---------------------------------------------------------------------------
 # Fixtures de flow engine mockado
+# Taxonomia nova: cursos_presenciais = Caminho 2 (todos os presenciais)
 # ---------------------------------------------------------------------------
 
 def _make_mock_context(
@@ -119,6 +129,7 @@ def _make_mock_context(
     eh_medico: Optional[bool] = None,
     experiencia_corporal: Optional[bool] = None,
     resumo: Optional[str] = None,
+    produto_interesse: Optional[str] = None,
 ):
     """Cria SessionContext mockado."""
     from app.core.memory import SessionContext
@@ -136,6 +147,7 @@ def _make_mock_context(
         resumo_rolante=resumo,
         historico_recente=[],
         sessao_id=100,
+        produto_interesse=produto_interesse,
     )
 
 
@@ -145,9 +157,13 @@ def _make_flow_engine(
     resposta: str = "resposta mock",
     handoff: bool = False,
 ) -> object:
-    """Cria FlowEngine com todas as deps mockadas."""
+    """
+    Cria FlowEngine com todas as deps mockadas.
+    Usa a taxonomia correta do MAPA MESTRE (6 caminhos oficiais).
+    intencao_valor deve ser um valor de ClassificacaoIntencao valido.
+    """
     from app.core.flow import FlowEngine
-    from app.core.intent import ClassificacaoIntencao, Idioma
+    from app.core.intent import ClassificacaoIntencao, Idioma, INTENCAO_PARA_CAMINHO
 
     db_mock = AsyncMock()
 
@@ -162,21 +178,23 @@ def _make_flow_engine(
 
     intent_mock = AsyncMock()
     intent_mock.classify.return_value = (intencao, idioma)
-    intent_mock.get_caminho = lambda i: {
-        ClassificacaoIntencao.CURSO_ONLINE: 1,
-        ClassificacaoIntencao.HG_MODULO_1: 2,
-        ClassificacaoIntencao.HG360_SP: 3,
-        ClassificacaoIntencao.HG360_BARCELONA: 4,
-        ClassificacaoIntencao.PACIENTE_MODELO: 5,
-        ClassificacaoIntencao.LICENCIAMENTO_FRANQUIA: 6,
-    }.get(i)
+    # get_caminho usa o mapeamento oficial (INTENCAO_PARA_CAMINHO)
+    intent_mock.get_caminho = lambda i: INTENCAO_PARA_CAMINHO.get(i)
 
     memory_mock = MagicMock()
     memory_mock.build_messages_for_llm.return_value = []
 
     responder_mock = AsyncMock()
     responder_mock.generate.return_value = (resposta, handoff)
-    responder_mock.generate_menu.return_value = "MENU_PT\n1. Curso Online\n2. HG Modulo 1\n3. HG360 SP"
+    responder_mock.generate_menu.return_value = (
+        "MENU_PT\n"
+        "1. Curso Online de Harmonizacao Glutea\n"
+        "2. Cursos Presenciais de Harmonizacao Glutea\n"
+        "3. Sistema GoldIncision\n"
+        "4. Sou aluno e preciso de suporte\n"
+        "5. Sou paciente modelo\n"
+        "6. Outro assunto"
+    )
     responder_mock.generate_not_eligible.return_value = (
         "Esta formacao e exclusiva para medicos. Obrigado!"
     )
@@ -212,7 +230,7 @@ async def test_cenario1_intencao_clara_curso_online_sem_requalificacao():
 
     assert result.caminho == 1
     assert result.action in ("continue", "end")
-    assert "custa" in result.response_text.lower() or result.response_text
+    assert result.response_text  # nao vazio
 
 
 @pytest.mark.asyncio
@@ -220,13 +238,15 @@ async def test_cenario1_intencao_clara_nao_pergunta_se_medico():
     """
     Variacao: lead com intencao clara para presencial que JA informou ser medico
     nao deve receber pergunta de qualificacao.
+    Todos os presenciais = Caminho 2 (cursos_presenciais).
     """
     from app.core.flow import ETAPA_QUALIF_MEDICO
 
-    engine = _make_flow_engine(intencao_valor="hg_modulo_1", resposta="HG Modulo 1 info")
+    # Caminho 2 = cursos_presenciais (engloba HG Modulo 1, HG360 SP e Barcelona)
+    engine = _make_flow_engine(intencao_valor="cursos_presenciais", resposta="Info do Curso Presencial")
     # eh_medico=True, experiencia_corporal=True → vai direto para apresentacao
     ctx = _make_mock_context(caminho=2, etapa="apresentacao", eh_medico=True, experiencia_corporal=True)
-    result = await engine.process(1, "quero informacoes do HG Modulo 1", ctx)
+    result = await engine.process(1, "quero informacoes do curso presencial", ctx)
 
     # Nao deve ter etapa de qualificacao de medico
     assert result.etapa != ETAPA_QUALIF_MEDICO
@@ -267,7 +287,7 @@ async def test_cenario2_menu_em_menos_de_10s():
     elapsed = time.monotonic() - start
 
     assert result.response_text  # nao vazio
-    assert elapsed < 1.0  # limite conservador (real seria < 10s com LLM)
+    assert elapsed < 1.0  # limite conservador
 
 
 # ===========================================================================
@@ -278,8 +298,9 @@ async def test_cenario2_menu_em_menos_de_10s():
 async def test_cenario3_nao_medico_nao_elegivel():
     """
     Quickstart Cenario 3: lead que NAO e medico → informa exclusividade + encerra.
+    Caminho 2 = cursos_presenciais (HG Modulo 1 como sub-fluxo default).
     """
-    engine = _make_flow_engine(intencao_valor="hg_modulo_1")
+    engine = _make_flow_engine(intencao_valor="cursos_presenciais")
     ctx = _make_mock_context(caminho=2, etapa="qualif_medico", eh_medico=False)
 
     result = await engine.process(1, "nao sou medico", ctx)
@@ -293,15 +314,21 @@ async def test_cenario3_apenas_facial_nao_elegivel_para_hg360():
     """
     Quickstart Cenario 3 variacao: medico apenas com experiencia facial
     NAO e elegivel ao HG360 → indica HG Modulo 1.
+    Nota: todos os presenciais estao em Caminho 2 (cursos_presenciais).
     """
-    engine = _make_flow_engine(intencao_valor="hg360_sp")
-    ctx = _make_mock_context(caminho=3, etapa="qualif_experiencia", eh_medico=True, experiencia_corporal=False)
+    # Caminho 2 com sub-fluxo HG360 (produto_interesse setado)
+    engine = _make_flow_engine(intencao_valor="cursos_presenciais")
+    ctx = _make_mock_context(
+        caminho=2,
+        etapa="qualif_experiencia",
+        eh_medico=True,
+        experiencia_corporal=False,
+    )
 
     result = await engine.process(1, "apenas facial", ctx)
 
-    # Deve retornar mensagem de nao elegivel (sem acao de handoff obrigatoria)
+    # Deve retornar mensagem de nao elegivel ou redirecionar
     assert result.action in ("handoff", "continue", "end")
-    # A resposta gerada pelo mock do responder nao vai detalhar, mas o etapa deve sair de qualif
     assert result.etapa is not None
 
 
@@ -329,11 +356,11 @@ async def test_cenario4_nao_repete_pergunta_medico():
     """
     from app.core.flow import ETAPA_QUALIF_MEDICO
 
-    engine = _make_flow_engine(intencao_valor="hg_modulo_1", resposta="HG Modulo 1: info completa")
+    engine = _make_flow_engine(intencao_valor="cursos_presenciais", resposta="Info: curso presencial")
     # Contexto ja tem eh_medico=True, experiencia_corporal=True
     ctx = _make_mock_context(caminho=2, etapa="apresentacao", eh_medico=True, experiencia_corporal=True)
 
-    result = await engine.process(1, "quero saber mais sobre o modulo", ctx)
+    result = await engine.process(1, "quero saber mais sobre o curso", ctx)
 
     # Nao deve ter pergunta de qualificacao
     assert result.etapa != ETAPA_QUALIF_MEDICO
@@ -344,12 +371,13 @@ async def test_cenario4_nao_repete_pergunta_medico():
 async def test_cenario4_nao_repete_pergunta_experiencia():
     """
     Lead ja informou experiencia corporal: motor nao deve perguntar de novo.
+    Dentro do Caminho 2 (cursos_presenciais), sub-caminho HG360.
     """
     from app.core.flow import ETAPA_QUALIF_EXPERIENCIA
 
-    engine = _make_flow_engine(intencao_valor="hg360_sp", resposta="HG360 info completa")
+    engine = _make_flow_engine(intencao_valor="cursos_presenciais", resposta="HG360 info completa")
     ctx = _make_mock_context(
-        caminho=3,
+        caminho=2,
         etapa="apresentacao",
         eh_medico=True,
         experiencia_corporal=True,
@@ -358,7 +386,7 @@ async def test_cenario4_nao_repete_pergunta_experiencia():
     result = await engine.process(1, "diga mais sobre o HG360", ctx)
 
     assert result.etapa != ETAPA_QUALIF_EXPERIENCIA
-    assert result.caminho == 3
+    assert result.caminho == 2
 
 
 # ===========================================================================
@@ -425,7 +453,6 @@ def test_cenario6_idempotencia_descarta_duplicata():
 
         assert resp1.status_code == 200
         assert resp2.status_code == 200
-        # Ambos retornam 200 mas o segundo foi descartado internamente
         assert resp1.json() == {"ack": "ok"}
         assert resp2.json() == {"ack": "ok"}
         assert len(check_calls) == 2  # idempotency checker chamado nas 2 vezes
@@ -438,15 +465,22 @@ def test_cenario6_idempotencia_descarta_duplicata():
 @pytest.mark.asyncio
 async def test_cenario7_handoff_apos_confirmacao():
     """
-    Quickstart Cenario 7: lead elegivel para HG Modulo 1 diz 'sim' ao encaminhamento.
+    Quickstart Cenario 7: lead elegivel para cursos presenciais diz 'sim' ao encaminhamento.
     FlowEngine deve retornar action=handoff.
     """
     engine = _make_flow_engine(
-        intencao_valor="hg_modulo_1",
+        intencao_valor="cursos_presenciais",
         resposta="Vou encaminhar ao consultor!",
         handoff=True,
     )
-    ctx = _make_mock_context(caminho=2, etapa="apresentacao", eh_medico=True, experiencia_corporal=True)
+    # produto_interesse setado → motor vai direto para apresentacao (sem perguntar turma)
+    ctx = _make_mock_context(
+        caminho=2,
+        etapa="apresentacao",
+        eh_medico=True,
+        experiencia_corporal=True,
+        produto_interesse="hg-modulo-1",
+    )
 
     result = await engine.process(1, "sim, quero ser encaminhado", ctx)
 
@@ -487,7 +521,7 @@ async def test_cenario8_paciente_modelo_envia_contato_nidia():
 
     assert result.action == "end"
     assert result.caminho == 5
-    assert "97423" in result.response_text or "Nidia" in result.response_text or "nidia" in result.response_text.lower()
+    assert "97423" in result.response_text or "nidia" in result.response_text.lower()
 
 
 @pytest.mark.asyncio
@@ -517,7 +551,7 @@ def test_cenario9_admin_crud_retorna_401_sem_token():
         "slug": "hg-avancado-teste",
         "nome": "HG Avancado",
         "tipo": "presencial",
-        "caminhoMapaMestre": 3,
+        "caminhoMapaMestre": 2,
         "elegibilidade": {"medico": True},
         "ativo": True,
         "apresentacoes": [{"idioma": "pt", "texto": "Apresentacao oficial verbatim."}],
@@ -543,14 +577,15 @@ def test_cenario9_catalogo_runtime_reflete_novo_curso():
     Quickstart Cenario 9: mudancas no catalogo refletem em conversas novas
     sem redeploy (FR-026) — verificado via config (leitura em runtime por slug).
     """
-    # O motor _load_knowledge usa SELECT por slug do Postgres em runtime.
-    # Este teste verifica que o FlowEngine nao tem cache hardcoded.
     from app.core.flow import _CAMINHO_PARA_SLUG
 
-    # Caminhos 1-4 tem slug mapeado (carregado do DB em runtime)
+    # Caminho 1: Curso Online tem slug fixo
     assert _CAMINHO_PARA_SLUG[1] == "curso-online-hg"
-    assert _CAMINHO_PARA_SLUG[2] == "hg-modulo-1"
-    # Caminho 5 (paciente) nao tem curso no catalogo
+    # Caminho 2: Cursos Presenciais tem slug dinamico (resolvido por sub-fluxo)
+    assert _CAMINHO_PARA_SLUG[2] is None
+    # Caminho 3: Sistema GoldIncision — slug do licenciamento
+    assert _CAMINHO_PARA_SLUG[3] == "licenciamento-internacional"
+    # Caminho 5: paciente modelo nao tem curso no catalogo
     assert _CAMINHO_PARA_SLUG[5] is None
 
 
@@ -583,11 +618,9 @@ async def test_cenario10_falha_transcricao_pede_repeticao():
     """
     Quickstart Cenario 10 (error): transcricao falha → agente pede repeticao em texto.
     Verifica que o cliente OpenAI propaga a excecao corretamente (FR-005).
-    O modulo openai e mockado para evitar dep real.
     """
     with patch.dict("sys.modules", {"openai": MagicMock()}):
 
-        # Limpar cache para reimportar com mock
         import sys
         if "app.integrations.openai_client" in sys.modules:
             del sys.modules["app.integrations.openai_client"]
@@ -601,7 +634,6 @@ async def test_cenario10_falha_transcricao_pede_repeticao():
         )
 
         with patch.object(OpenAIClientCls, "transcribe_audio", mock_oa_instance.transcribe_audio):
-            # Instanciar sem modulo openai real
             with patch.dict("sys.modules", {"openai": MagicMock()}):
                 if "app.integrations.openai_client" in sys.modules:
                     del sys.modules["app.integrations.openai_client"]
@@ -653,8 +685,6 @@ def test_cenario11_responder_usa_grounding_nao_livre():
     Verifica que o GroundedResponder exige knowledge_context para gerar respostas
     (nao inventa conteudo de negocio).
     """
-    # O GroundedResponder requer knowledge_context — sem ele, usa base vazia
-    # (verificar que a assinatura do metodo recebe knowledge_context)
     import inspect
 
     from app.core.responder import GroundedResponder
@@ -691,7 +721,6 @@ def test_cenario12_tipo_desconhecido_descartado():
     with patch("app.api.webhook._get_redis", return_value=None):
         client = _make_client()
         payload = _webhook_payload(chamado_id=900012, text="sticker message")
-        # Payload ainda e valido do ponto de vista do schema (type e tolerante)
         resp = _post_webhook(client, payload)
 
     assert resp.status_code == 200
@@ -719,11 +748,6 @@ class TestCenario13RoundtripWebhookExamples:
     """
     Quickstart Cenario 13: validacao de contrato inbound com os payloads reais
     de knowledge_base/example_webhook_json/.
-
-    Obrigatorio (skill /plan §5.3): comparar shape do payload contra contrato.
-    Campos obrigatorios: sender, chamadoId, mensagem[].type, fromMe,
-    ticketData.status. Nenhum campo obrigatorio pode ser perdido por
-    divergencia de nome/case (anti-drift).
     """
 
     def _load_body(self, filename: str) -> dict:
@@ -776,7 +800,6 @@ class TestCenario13RoundtripWebhookExamples:
         parsed = WebhookPayload.model_validate(body)
 
         assert parsed.chamadoId == 138901
-        # Tipo pode ser "video" ou "document" — o importante e ter media_url
         assert parsed.mensagem[0].media_url is not None
 
     def test_todos_os_payloads_retornam_200_no_endpoint(self):
@@ -809,16 +832,11 @@ class TestCenario13RoundtripWebhookExamples:
         body = self._load_body("json_message,json")
         parsed = WebhookPayload.model_validate(body)
 
-        # chamadoId (nao chamado_id, nao ChamadoId)
         assert parsed.chamadoId is not None
-        # sender (nao Sender, nao phone)
         assert parsed.sender is not None
-        # fromMe (nao from_me)
         assert isinstance(parsed.fromMe, bool)
-        # ticketData.status
         assert parsed.ticketData is not None
         assert parsed.ticketData.status is not None
-        # contact_number derivado corretamente
         assert parsed.contact_number == str(parsed.sender)
 
 
@@ -844,10 +862,9 @@ def test_cenario14_stack_yml_inspecao():
     assert "redis:" in content, "Servico 'redis' ausente no stack.yml"
 
     # Secrets nao devem estar em texto claro (FR-032)
-    # Verifica ausencia de padroes suspeitos (chaves, tokens reais)
     SECRET_PATTERNS = [
-        r"sk-[A-Za-z0-9]{20,}",         # OpenAI key
-        r"password\s*:\s*['\"]?\w{8,}",  # senha hardcoded com valor
+        r"sk-[A-Za-z0-9]{20,}",
+        r"password\s*:\s*['\"]?\w{8,}",
     ]
     for pattern in SECRET_PATTERNS:
         matches = re.findall(pattern, content, re.IGNORECASE)
@@ -870,11 +887,6 @@ def test_cenario14_dockerfile_existe():
 class TestRateLimitingLLMCap:
     """
     Task 8.1.4: testes de rate limiting e teto de gasto LLM.
-
-    O sistema implementa:
-    1. Rate limiting por IP nas rotas /admin/* (in-memory, SEC-ADM-2).
-    2. Config de teto de gasto LLM: llm_max_tokens_per_hour (SEC-WH-3).
-    3. Config de limite por sender/minuto: max_requests_per_sender_per_minute.
     """
 
     def test_rate_limit_admin_429_apos_max_tentativas(self):
@@ -883,12 +895,10 @@ class TestRateLimitingLLMCap:
         """
         from app.api.admin import _RATE_LIMIT_MAX, _check_rate_limit, _rate_store
 
-        # Limpar estado do rate limiter antes do teste
         _rate_store.clear()
 
-        fake_ip = "192.0.2.100"  # TEST-NET (nao roteavel)
+        fake_ip = "192.0.2.100"
 
-        # Encher o rate store
         import time
         now = time.monotonic()
         _rate_store[fake_ip] = [now] * _RATE_LIMIT_MAX
@@ -908,9 +918,8 @@ class TestRateLimitingLLMCap:
         _rate_store.clear()
         fake_ip = "192.0.2.101"
 
-        # MAX - 1 chamadas devem passar
         for _ in range(_RATE_LIMIT_MAX - 1):
-            _check_rate_limit(fake_ip)  # nao deve levantar excecao
+            _check_rate_limit(fake_ip)
 
     def test_config_llm_max_tokens_por_hora_definido(self):
         """
@@ -919,7 +928,6 @@ class TestRateLimitingLLMCap:
         from app.config import settings
 
         assert settings.llm_max_tokens_per_hour > 0
-        # Valor padrao razoavel para producao (nao deve ser absurdamente alto)
         assert settings.llm_max_tokens_per_hour <= 10_000_000
 
     def test_config_max_requests_por_sender_definido(self):
@@ -947,11 +955,9 @@ class TestRateLimitingLLMCap:
         _rate_store.clear()
         fake_ip = "192.0.2.102"
 
-        # Preencher com timestamps antigos (fora da janela)
         old_time = time.monotonic() - _RATE_LIMIT_WINDOW - 1
         _rate_store[fake_ip] = [old_time] * _RATE_LIMIT_MAX
 
-        # Deve passar (todos os requests estao fora da janela)
         _check_rate_limit(fake_ip)  # nao deve levantar 429
 
 
@@ -962,12 +968,9 @@ class TestRateLimitingLLMCap:
 def test_pytest_asyncio_configurado():
     """
     8.1.1: pytest-asyncio deve estar configurado em asyncio_mode=auto.
-    Verificado indiretamente: testes @pytest.mark.asyncio passam sem
-    decorator adicional de event loop.
     """
     import pytest_asyncio
 
-    # Se chegamos aqui, pytest-asyncio esta instalado e funcionando
     assert pytest_asyncio.__version__
 
 
@@ -975,19 +978,16 @@ def test_mocks_openai_e_chatmaster_padrao():
     """
     8.1.1: OpenAI e ChatMaster sao mockados por padrao — nenhuma chamada
     real sai durante os testes (zero deps externas para rodar a suite).
-    Verifica que as classes existem e sao importaveis; instanciacao real
-    requer credenciais (mockadas nos outros testes via patch).
     """
     import importlib
+    import inspect
 
-    # Verificar que os modulos existem
     oa_module = importlib.import_module("app.integrations.openai_client")
     cm_module = importlib.import_module("app.integrations.chatmaster")
 
     assert hasattr(oa_module, "OpenAIClient")
     assert hasattr(cm_module, "ChatMasterClient")
 
-    # ChatMasterClient pode ser instanciado sem credencial real
     from app.integrations.chatmaster import ChatMasterClient
 
     cm = ChatMasterClient(
@@ -998,9 +998,6 @@ def test_mocks_openai_e_chatmaster_padrao():
     )
     assert cm is not None
 
-    # OpenAIClient requer api_key nao-vazia — verificar apenas a assinatura
-    import inspect
-
     sig = inspect.signature(oa_module.OpenAIClient.__init__)
     assert "api_key" in sig.parameters
     assert "model_cheap" in sig.parameters
@@ -1010,11 +1007,8 @@ def test_mocks_openai_e_chatmaster_padrao():
 def test_infraestrutura_efemera_documentada():
     """
     8.1.1: documenta que testcontainers pode ser ativado via env var.
-    Quando PYTEST_USE_TESTCONTAINERS=1, fixtures podem usar Postgres/Redis reais.
-    Este teste verifica apenas a deteccao da variavel.
     """
     use_tc = os.environ.get("PYTEST_USE_TESTCONTAINERS", "0")
-    # O teste passa seja qual for o valor — apenas documenta a convencao
     assert use_tc in ("0", "1"), "PYTEST_USE_TESTCONTAINERS deve ser '0' ou '1'"
 
 
@@ -1036,10 +1030,8 @@ async def test_jornada_curso_online_preco_direto_sem_requalificacao():
     )
     ctx = _make_mock_context(eh_medico=True)
 
-    # Primeira mensagem: intencao clara
     result = await engine.process(1, "Quanto custa o curso online de harmonizacao glutea?", ctx)
 
-    # Caminho 1 ativado, sem perguntas de qualificacao (eh_medico ja estava True)
     assert result.caminho == 1
     assert result.action in ("continue", "end")
 
@@ -1047,27 +1039,221 @@ async def test_jornada_curso_online_preco_direto_sem_requalificacao():
 @pytest.mark.asyncio
 async def test_jornada_presencial_qualificacao_elegibilidade_handoff():
     """
-    Jornada Cenario 7: trilha presencial — qualificacao → elegibilidade → handoff.
+    Jornada Cenario 7: trilha presencial (Caminho 2) — qualificacao → handoff.
+    Todos os presenciais agora ficam em Caminho 2 (cursos_presenciais).
     """
-    # Passo 1: Lead pergunta sobre HG360 SP
-    engine1 = _make_flow_engine(intencao_valor="hg360_sp")
+    # Passo 1: Lead pergunta sobre cursos presenciais
+    engine1 = _make_flow_engine(intencao_valor="cursos_presenciais")
     ctx = _make_mock_context()  # sem qualificacao
 
-    result1 = await engine1.process(1, "quero informacoes do HG360 SP", ctx)
-    assert result1.caminho == 3
+    result1 = await engine1.process(1, "quero informacoes sobre cursos presenciais", ctx)
+    assert result1.caminho == 2
 
     # Passo 2: Confirma ser medico
     from app.core.flow import ETAPA_QUALIF_MEDICO
     ctx.etapa = ETAPA_QUALIF_MEDICO
-    ctx.eh_medico = None  # ainda nao definido
+    ctx.eh_medico = None
 
-    engine2 = _make_flow_engine(intencao_valor="hg360_sp")
+    engine2 = _make_flow_engine(intencao_valor="cursos_presenciais")
     _ = await engine2.process(1, "sim, sou medico com CRM ativo", ctx)
 
-    # Passo 3: Confirma ter experiencia corporal (motor atualiza via _detectar)
+    # Passo 3: Confirma ter experiencia corporal → escolha de turma → handoff
     ctx.eh_medico = True
     ctx.experiencia_corporal = True
-    engine3 = _make_flow_engine(intencao_valor="hg360_sp", resposta="HG360 info...", handoff=True)
+    # Setar produto_interesse para pular a escolha de turma e ir direto para apresentacao
+    ctx.produto_interesse = "hg360-sp"
+    ctx.etapa = "apresentacao"
+    engine3 = _make_flow_engine(
+        intencao_valor="cursos_presenciais",
+        resposta="Vou encaminhar ao consultor!",
+        handoff=True,
+    )
     result3 = await engine3.process(1, "sim, quero ser encaminhado ao consultor", ctx)
 
     assert result3.action == "handoff"
+
+
+# ===========================================================================
+# F8 — E2e webhook→FlowEngine REAL (falha se engine desconectado)
+# ===========================================================================
+
+class TestF8WebhookEngineWired:
+    """
+    F8: testa que o webhook realmente invoca o FlowEngine.
+    Estes testes FALHAM se _process_consolidated_messages nao chamar
+    _handle_engine ou se _handle_engine nao instanciar FlowEngine.process().
+
+    Diferenca dos outros testes: aqui usamos o _handle_engine REAL (nao mockado)
+    e verificamos que FlowEngine.process() foi chamado.
+    """
+
+    @pytest.mark.asyncio
+    async def test_handle_engine_invoca_flow_engine_process(self):
+        """
+        F8 — Critico: _handle_engine deve instanciar e chamar FlowEngine.process().
+        FALHA se engine estiver desconectado (TODO sem implementacao real).
+
+        Estrategia: mockar as deps do FlowEngine (DB, Redis, OpenAI, ChatMaster)
+        mas usar a funcao real _handle_engine — verificando via spy que
+        FlowEngine.process() foi de fato chamado.
+        """
+        from app.api.webhook import _handle_engine
+        from app.core.flow import FlowEngine, FlowResult
+
+        # Montar FlowResult que o FlowEngine.process() retornaria
+        fake_result = FlowResult(
+            response_text="Ola! Como posso ajudar?",
+            action="continue",
+            caminho=None,
+            etapa="menu",
+            updates={"idioma": "pt"},
+        )
+
+        # Rastrear se FlowEngine.process foi chamado
+        process_was_called = []
+
+        original_process = FlowEngine.process
+
+        async def spy_process(self_engine, ticket_id, user_message, context):
+            process_was_called.append({"ticket_id": ticket_id, "message": user_message})
+            return fake_result
+
+        # Mocks de infraestrutura (DB, Redis, OpenAI, ChatMaster)
+        mock_db_session = AsyncMock()
+        # Retorno do upsert de Contato (contato_id)
+        mock_db_session.execute.return_value.scalar_one.side_effect = [
+            10,   # Contato.id
+            "aberto",  # Ticket.status
+        ]
+        mock_db_session.flush = AsyncMock()
+        mock_db_session.commit = AsyncMock()
+        mock_db_session.rollback = AsyncMock()
+        mock_db_session.__aenter__ = AsyncMock(return_value=mock_db_session)
+        mock_db_session.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session_factory = MagicMock(return_value=mock_db_session)
+
+        # SessionContext mock que o MemoryManager.load_context retorna
+        from app.core.memory import SessionContext
+        mock_context = SessionContext(
+            ticket_id=1,
+            chamado_id=900099,
+            contato_id=10,
+            caminho=None,
+            etapa=None,
+            idioma="pt",
+            eh_medico=None,
+            especialidade=None,
+            experiencia_corporal=None,
+            resumo_rolante=None,
+            historico_recente=[],
+            sessao_id=100,
+        )
+
+        messages_payload = [
+            {
+                "chamadoId": 900099,
+                "sender": "5511999990099",
+                "nome": "Lead F8",
+                "mensagem": [{"type": "text", "text": "Ola, quero saber sobre cursos"}],
+                "ticketStatus": "open",
+                "ticketData": None,
+                "queueId": 78,
+            }
+        ]
+
+        with (
+            patch("app.main.get_session_factory", return_value=mock_session_factory),
+            patch("app.api.webhook._get_redis", return_value=MagicMock()),
+            patch("app.core.flow.FlowEngine.process", spy_process),
+            patch("app.core.memory.MemoryManager.load_context", AsyncMock(return_value=mock_context)),
+            patch("app.core.memory.MemoryManager.update_qualification_variables", AsyncMock()),
+            patch("app.core.memory.MemoryManager.update_ticket_state", AsyncMock()),
+            patch("app.core.memory.MemoryManager.save_message", AsyncMock()),
+            patch("app.integrations.openai_client.OpenAIClient.__init__", return_value=None),
+            patch("app.integrations.chatmaster.make_chatmaster_client"),
+            patch("app.core.intent.IntentClassifier.__init__", return_value=None),
+            patch("app.core.responder.GroundedResponder.__init__", return_value=None),
+        ):
+            await _handle_engine(900099, messages_payload)
+
+        # VERIFICACAO CRITICA: FlowEngine.process() DEVE ter sido chamado
+        assert len(process_was_called) == 1, (
+            "FlowEngine.process() nao foi chamado! "
+            "_handle_engine esta desconectado do motor conversacional. "
+            "Verifique a implementacao de _handle_engine em webhook.py."
+        )
+        assert process_was_called[0]["message"] == "Ola, quero saber sobre cursos"
+
+    @pytest.mark.asyncio
+    async def test_handle_engine_nao_invocado_sem_session_factory(self):
+        """
+        F8 — Seguranca: sem session_factory, _handle_engine deve abortar
+        silenciosamente (nao lanca excecao, nao invoca engine).
+        """
+        from app.api.webhook import _handle_engine
+        from app.core.flow import FlowEngine
+
+        process_was_called = []
+
+        async def spy_process(self_engine, ticket_id, user_message, context):
+            process_was_called.append(True)
+
+        messages = [
+            {
+                "chamadoId": 900098,
+                "sender": "5511999990098",
+                "nome": "Lead",
+                "mensagem": [{"type": "text", "text": "oi"}],
+                "ticketStatus": "open",
+                "ticketData": None,
+                "queueId": 78,
+            }
+        ]
+
+        with (
+            patch("app.main.get_session_factory", return_value=None),
+            patch("app.core.flow.FlowEngine.process", spy_process),
+        ):
+            # Nao deve levantar excecao
+            await _handle_engine(900098, messages)
+
+        # Engine NAO deve ter sido chamado (sem session_factory disponivel)
+        assert len(process_was_called) == 0, (
+            "FlowEngine.process() nao deveria ser chamado sem session_factory"
+        )
+
+    @pytest.mark.asyncio
+    async def test_webhook_endpoint_dispara_handle_engine_via_background(self):
+        """
+        F8 — Contrato HTTP: POST /webhook/chatmaster deve chamar
+        _process_consolidated_messages via BackgroundTasks quando Redis=None.
+        Este teste verifica que o endpoint nao e um no-op (nao bypassa o pipeline).
+        """
+        from app.api import webhook as webhook_module
+
+        process_calls = []
+
+        original_process = webhook_module._process_consolidated_messages
+
+        async def spy_process(chamado_id, messages):
+            process_calls.append({"chamado_id": chamado_id, "n_msgs": len(messages)})
+
+        with (
+            patch("app.api.webhook._get_redis", return_value=None),
+            patch.object(webhook_module, "_process_consolidated_messages", spy_process),
+        ):
+            client = _make_client()
+            payload = _webhook_payload(chamado_id=900097, text="oi, quero informacoes")
+            resp = _post_webhook(client, payload)
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ack": "ok"}
+
+        # O BackgroundTasks chama _process_consolidated_messages de forma sincrona
+        # no TestClient (TestClient executa background tasks sincronamente)
+        assert len(process_calls) >= 1, (
+            "_process_consolidated_messages nao foi chamado pelo endpoint. "
+            "O webhook pode estar descartando a mensagem indevidamente."
+        )
+        assert process_calls[0]["chamado_id"] == 900097

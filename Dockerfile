@@ -15,23 +15,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copiar apenas o manifesto de dependencias primeiro (cache layer)
+# Copiar manifesto de dependencias + stub minimo do pacote para pip resolver deps
 COPY pyproject.toml ./
+RUN mkdir -p app && touch app/__init__.py
 
-# Instalar dependencias em /install para copiar na stage 2
-RUN pip install --no-cache-dir --prefix=/install \
-    fastapi \
-    "uvicorn[standard]" \
-    pydantic \
-    pydantic-settings \
-    "sqlalchemy[asyncio]" \
-    asyncpg \
-    alembic \
-    "redis[hiredis]" \
-    openai \
-    httpx \
-    python-multipart \
-    python-jose
+# Instalar dependencias declaradas em pyproject.toml (inclui python-docx e pypdf)
+# O stub app/__init__.py permite que pip instale as deps sem o codigo completo
+RUN pip install --no-cache-dir --prefix=/install .
 
 # --- Stage 2: runtime ---
 FROM python:3.12-slim

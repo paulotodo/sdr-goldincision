@@ -189,25 +189,22 @@ class MockFlowEngine:
             updates["caminho_atual"] = CaminhoMapaMestre.PACIENTE_MODELO
             return FlowResult(resposta, "end", CaminhoMapaMestre.PACIENTE_MODELO, ETAPA_PACIENTE, updates)
 
-        # Caminho 6
-        if caminho_ativo == CaminhoMapaMestre.LICENCIAMENTO_FRANQUIA:
+        # Caminho 3 (Sistema GoldIncision: licenciamento/franquia)
+        if caminho_ativo == CaminhoMapaMestre.SISTEMA_GOLDINCISION:
             knowledge = await self._load_knowledge(caminho_ativo, context.idioma)
             r, h = await self._responder.generate(
-                user_message, caminho_ativo, context.etapa or "licenciamento_qualif",
+                user_message, caminho_ativo, context.etapa or "sistema_qualif",
                 knowledge
             )
             action = "handoff" if h else "continue"
             updates["caminho_atual"] = caminho_ativo
-            return FlowResult(r, action, caminho_ativo, context.etapa or "licenciamento_qualif", updates)
+            return FlowResult(r, action, caminho_ativo, context.etapa or "sistema_qualif", updates)
 
-        # Caminhos 1-4
+        # Caminhos 1-2 (e 4 se necessario — todos requerem qualificacao medica)
         context.caminho = caminho_ativo
         updates["caminho_atual"] = caminho_ativo
 
         if context.eh_medico is None:
-            resposta = await self._responder._gerar_pergunta_medico(context.idioma) \
-                if hasattr(self._responder, '_gerar_pergunta_medico') \
-                else f"E medico? ({context.idioma})"
             # Usar gerar_pergunta_medico do responder (simplificado)
             from app.core.flow import FlowEngine
             resposta = await FlowEngine._gerar_pergunta_medico(self, context.idioma)
@@ -217,22 +214,14 @@ class MockFlowEngine:
             resposta = await self._responder.generate_not_eligible(context.idioma)
             return FlowResult(resposta, "handoff", caminho_ativo, ETAPA_HANDOFF, updates)
 
-        if caminho_ativo in (
-            CaminhoMapaMestre.HG_MODULO_1,
-            CaminhoMapaMestre.HG360_SP,
-            CaminhoMapaMestre.HG360_BARCELONA,
-        ) and context.experiencia_corporal is None:
+        # Caminho 2 (cursos_presenciais): verificar experiencia corporal
+        if caminho_ativo == CaminhoMapaMestre.CURSOS_PRESENCIAIS and context.experiencia_corporal is None:
             from app.core.flow import FlowEngine
             resposta = await FlowEngine._gerar_pergunta_experiencia(self, context.idioma, caminho_ativo)
             return FlowResult(resposta, "continue", caminho_ativo, ETAPA_QUALIF_EXPERIENCIA, updates)
 
-        if caminho_ativo in (
-            CaminhoMapaMestre.HG_MODULO_1,
-            CaminhoMapaMestre.HG360_SP,
-            CaminhoMapaMestre.HG360_BARCELONA,
-        ) and context.experiencia_corporal is False:
-            from app.core.flow import FlowEngine
-            resposta = await FlowEngine._gerar_nao_elegivel_experiencia(self, context.idioma, caminho_ativo)
+        if caminho_ativo == CaminhoMapaMestre.CURSOS_PRESENCIAIS and context.experiencia_corporal is False:
+            resposta = await self._responder.generate_not_eligible(context.idioma)
             return FlowResult(resposta, "handoff", caminho_ativo, ETAPA_HANDOFF, updates)
 
         # Elegivel: gerar resposta com base
@@ -300,13 +289,13 @@ async def test_lead_nao_medico_handoff():
 
 @pytest.mark.asyncio
 async def test_medico_sem_experiencia_corporal_para_presencial():
-    """Medico sem experiencia em corporal → nao elegivel para HG Modulo 1."""
+    """Medico sem experiencia em corporal → nao elegivel para cursos presenciais."""
     engine = MockFlowEngine(
-        intent=MockIntentClassifier(ClassificacaoIntencao.HG_MODULO_1),
+        intent=MockIntentClassifier(ClassificacaoIntencao.CURSOS_PRESENCIAIS),
         responder=MockResponder(),
     )
     ctx = make_context(
-        caminho=CaminhoMapaMestre.HG_MODULO_1,
+        caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS,
         eh_medico=True,
         experiencia_corporal=False,
     )
@@ -321,12 +310,12 @@ async def test_medico_sem_experiencia_corporal_para_presencial():
 async def test_medico_com_experiencia_recebe_apresentacao():
     """Medico com experiencia corporal → elegivel → recebe apresentacao do curso."""
     engine = MockFlowEngine(
-        intent=MockIntentClassifier(ClassificacaoIntencao.HG_MODULO_1),
+        intent=MockIntentClassifier(ClassificacaoIntencao.CURSOS_PRESENCIAIS),
         responder=MockResponder(response_text="APRESENTACAO_OFICIAL"),
         knowledge="BASE_KNOWLEDGE_HG1",
     )
     ctx = make_context(
-        caminho=CaminhoMapaMestre.HG_MODULO_1,
+        caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS,
         eh_medico=True,
         experiencia_corporal=True,
     )
@@ -356,34 +345,34 @@ async def test_caminho_5_paciente_modelo_somente_nidia():
 
 
 @pytest.mark.asyncio
-async def test_caminho_6_licenciamento_para_reuniao():
-    """Caminho 6: qualifica interesse e conduz para reuniao."""
+async def test_caminho_3_sistema_goldincision_para_reuniao():
+    """Caminho 3: qualifica interesse no Sistema GoldIncision e conduz para reuniao."""
     engine = MockFlowEngine(
-        intent=MockIntentClassifier(ClassificacaoIntencao.LICENCIAMENTO_FRANQUIA),
+        intent=MockIntentClassifier(ClassificacaoIntencao.SISTEMA_GOLDINCISION),
         responder=MockResponder(response_text="Vamos marcar uma reuniao"),
     )
     ctx = make_context()
 
     result = await engine.process(1, "quero o licenciamento", ctx)
 
-    assert result.caminho == CaminhoMapaMestre.LICENCIAMENTO_FRANQUIA
+    assert result.caminho == CaminhoMapaMestre.SISTEMA_GOLDINCISION
     assert result.action == "continue"
 
 
 @pytest.mark.asyncio
 async def test_mudanca_de_assunto_redireciona():
     """Lead muda de assunto: caminho atual e substituido pelo novo."""
-    # Lead estava no caminho 1, agora pede licenciamento
+    # Lead estava no caminho 1, agora pede sistema_goldincision (caminho 3)
     engine = MockFlowEngine(
-        intent=MockIntentClassifier(ClassificacaoIntencao.LICENCIAMENTO_FRANQUIA),
+        intent=MockIntentClassifier(ClassificacaoIntencao.SISTEMA_GOLDINCISION),
         responder=MockResponder(),
     )
     ctx = make_context(caminho=1, etapa="apresentacao", eh_medico=True)
 
     _ = await engine.process(1, "na verdade quero saber sobre licenciamento", ctx)
 
-    # Deve ter mudado para caminho 6
-    assert ctx.caminho == CaminhoMapaMestre.LICENCIAMENTO_FRANQUIA
+    # Deve ter mudado para caminho 3 (Sistema GoldIncision)
+    assert ctx.caminho == CaminhoMapaMestre.SISTEMA_GOLDINCISION
 
 
 @pytest.mark.asyncio

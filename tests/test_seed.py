@@ -155,25 +155,55 @@ def test_extract_file_none_para_arquivo_inexistente(tmp_path):
     assert result is None
 
 
-def test_parse_objecoes_texto_estruturado():
-    """_parse_objecoes deve extrair pares de texto estruturado."""
+def test_parse_objecoes_formato_obj_nnn():
+    """
+    _parse_objecoes deve extrair pares no formato OBJ-NNN (curso online).
+    Formato real: OBJ-001 – Titulo / Quando utilizar / Resposta homologada / resposta.
+    """
     from app.seed import _parse_objecoes
     texto = (
-        "Objecao: Esta muito caro.\n\n"
-        "Resposta: O investimento se paga rapidamente.\n\n"
-        "Objecao: Nao tenho tempo.\n\n"
-        "Resposta: O curso e intensivo e em 2 dias."
+        "OBJ-001 – Esta muito caro\n\n"
+        "Quando utilizar\nQuando o medico afirmar que o investimento e alto.\n\n"
+        "Resposta homologada\n\n"
+        "O investimento se paga rapidamente.\n\n"
+        "OBJ-002 – Nao tenho tempo\n\n"
+        "Quando utilizar\nQuando o medico disser que esta sem tempo.\n\n"
+        "Resposta homologada\n\n"
+        "O curso e intensivo e em 2 dias."
     )
     pairs = _parse_objecoes(texto)
     assert len(pairs) == 2
-    assert pairs[0][0].strip() == "Esta muito caro."
+    assert pairs[0][0] == "Esta muito caro"
     assert "se paga" in pairs[0][1]
+    assert pairs[1][0] == "Nao tenho tempo"
+    assert "2 dias" in pairs[1][1]
+
+
+def test_parse_objecoes_formato_alternado():
+    """
+    _parse_objecoes deve extrair pares no formato alternado (presenciais).
+    Formato real: cabecalho / objecao / resposta / objecao / resposta ...
+    """
+    from app.seed import _parse_objecoes
+    texto = (
+        "HG Modulo 1\n\n"
+        "Esta muito caro\n\n"
+        "O investimento se paga rapidamente.\n\n"
+        "Nao tenho tempo\n\n"
+        "O curso e intensivo e em 2 dias."
+    )
+    pairs = _parse_objecoes(texto)
+    assert len(pairs) == 2
+    assert pairs[0][0] == "Esta muito caro"
+    assert "se paga" in pairs[0][1]
+    assert pairs[1][0] == "Nao tenho tempo"
 
 
 def test_parse_objecoes_texto_nao_estruturado():
-    """_parse_objecoes com texto sem pares deve retornar objecao generica."""
+    """_parse_objecoes com texto sem pares deve retornar objecao generica (fallback)."""
     from app.seed import _parse_objecoes
-    texto = "Este e um banco de objecoes sem formato padrao.\nContem informacoes gerais."
+    # Texto com apenas um paragrafo (sem pares alternados nem OBJ-NNN)
+    texto = "Texto unico sem estrutura de pares."
     pairs = _parse_objecoes(texto)
     # Fallback: deve retornar ao menos 1 par com o texto bruto
     assert len(pairs) >= 1

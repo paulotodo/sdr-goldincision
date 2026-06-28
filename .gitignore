@@ -6,3 +6,13 @@ __pycache__/
 *.log
 .venv/
 venv/
+
+# Artefatos de build/test
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Docs originais (fonte de referencia no topo; copia canonica em knowledge_base/)
+/documentos_agente/
+/example_webhook_json/

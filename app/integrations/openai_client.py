@@ -9,11 +9,10 @@ Dois modelos configurados via env (FR-001/005, Decisao 4 research.md):
 
 Transcricao de audio via Whisper API (FR-005, SC-007).
 NUNCA hardcodar OPENAI_API_KEY — lido de settings (via env/secret).
-
-Implementacao completa: FASE 4 (task 4.1/4.2) e FASE 4.4 (transcricao).
 """
 from __future__ import annotations
 
+import io
 import logging
 from typing import Any, Optional
 
@@ -24,16 +23,18 @@ class OpenAIClient:
     """
     Wrapper em torno do cliente OpenAI oficial.
     Instancia unica (singleton) com key da config.
-    STUB: implementacao completa em FASE 4.
     """
 
     def __init__(self, api_key: str, model_reasoning: str, model_cheap: str):
-        # TODO (FASE 4): instanciar openai.AsyncOpenAI(api_key=api_key)
+        import openai  # importado aqui para nao crashar em testes sem OPENAI_API_KEY
+
+        self._client = openai.AsyncOpenAI(api_key=api_key)
         self._model_reasoning = model_reasoning
         self._model_cheap = model_cheap
         logger.info(
             "OpenAIClient inicializado: reasoning=%s cheap=%s",
-            model_reasoning, model_cheap,
+            model_reasoning,
+            model_cheap,
         )
 
     async def chat_reasoning(
@@ -43,8 +44,20 @@ class OpenAIClient:
         temperature: float = 0.3,
     ) -> str:
         """Gera resposta usando o modelo de raciocinio."""
-        # TODO (FASE 4): chamar client.chat.completions.create com model_reasoning
-        raise NotImplementedError("chat_reasoning implementado em FASE 4")
+        response = await self._client.chat.completions.create(
+            model=self._model_reasoning,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        content = response.choices[0].message.content or ""
+        logger.debug(
+            "chat_reasoning: model=%s tokens_in=%s tokens_out=%s",
+            self._model_reasoning,
+            response.usage.prompt_tokens if response.usage else "?",
+            response.usage.completion_tokens if response.usage else "?",
+        )
+        return content.strip()
 
     async def chat_cheap(
         self,
@@ -53,13 +66,47 @@ class OpenAIClient:
         temperature: float = 0.0,
     ) -> str:
         """Classifica/sumariza usando o modelo barato."""
-        # TODO (FASE 4): chamar client.chat.completions.create com model_cheap
-        raise NotImplementedError("chat_cheap implementado em FASE 4")
+        response = await self._client.chat.completions.create(
+            model=self._model_cheap,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        content = response.choices[0].message.content or ""
+        logger.debug(
+            "chat_cheap: model=%s tokens_in=%s tokens_out=%s",
+            self._model_cheap,
+            response.usage.prompt_tokens if response.usage else "?",
+            response.usage.completion_tokens if response.usage else "?",
+        )
+        return content.strip()
 
     async def transcribe_audio(self, audio_bytes: bytes, filename: str = "audio.ogg") -> str:
         """
-        Transcreve audio (Whisper API).
-        Falha de transcricao propaga excecao; caller pede ao lead para repetir em texto.
+        Transcreve audio via Whisper API (FR-005, SC-007).
+
+        Args:
+            audio_bytes: conteudo binario do audio
+            filename: nome do arquivo com extensao correta (ogg/mp4/wav/etc)
+
+        Returns:
+            Texto transcrito
+
+        Raises:
+            Exception: propaga falha de transcricao; caller deve pedir ao lead
+                       que repita em texto (FR-005)
         """
-        # TODO (FASE 4.4): client.audio.transcriptions.create
-        raise NotImplementedError("transcribe_audio implementado em FASE 4.4")
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = filename
+
+        transcript = await self._client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+        )
+        text = transcript.text.strip()
+        logger.info(
+            "transcribe_audio: filename=%s chars=%s",
+            filename,
+            len(text),
+        )
+        return text

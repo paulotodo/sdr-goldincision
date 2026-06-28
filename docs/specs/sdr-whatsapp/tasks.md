@@ -123,42 +123,42 @@ Ref: contracts/webhook-inbound.md SEC-WH-2; spec.md FR-004/005
 
 Ref: spec.md FR-007/012; US1/US5; research.md Decisao 4
 
-- [ ] 4.1.1 Implementar `app/core/intent.py` (classificacao de intencao + deteccao de idioma com modelo barato)
-- [ ] 4.1.2 Entrada direta no fluxo quando intencao clara (sem menu); senao menu de 6 opcoes (FR-007)
-- [ ] 4.1.3 Persistir/atualizar idioma da sessao e tratar troca de idioma no meio (US5-AS5)
-- [ ] 4.1.4 Escrever testes (intencao clara → fluxo direto; ambigua → menu; troca de idioma persiste)
+- [x] 4.1.1 Implementar `app/core/intent.py` (classificacao de intencao + deteccao de idioma com modelo barato)
+- [x] 4.1.2 Entrada direta no fluxo quando intencao clara (sem menu); senao menu de 6 opcoes (FR-007)
+- [x] 4.1.3 Persistir/atualizar idioma da sessao e tratar troca de idioma no meio (US5-AS5)
+- [x] 4.1.4 Escrever testes (intencao clara → fluxo direto; ambigua → menu; troca de idioma persiste)
 
 ### 4.2 Motor de fluxo anti-alucinacao `[C]`
 
 Ref: spec.md FR-006/008/009/010/011/013/014/015; contracts/internal-flow.md; Princípio II
 
-- [ ] 4.2.1 Implementar `app/core/flow.py` com os 6 caminhos do Mapa Mestre
-- [ ] 4.2.2 Grounding estrito na hierarquia Mapa Mestre → Base Oficial → Banco de Objecoes → FAQ; recusa + handoff fora da base (FR-008, SC-008)
-- [ ] 4.2.3 Verificacao de elegibilidade medica inflexivel (FR-009; "apenas facial" → nao elegivel HG360)
-- [ ] 4.2.4 Apresentacoes oficiais na integra (verbatim, sem resumir — FR-010); objecoes EXCLUSIVAMENTE do Banco Oficial (FR-011)
-- [ ] 4.2.5 Caminho 5 (paciente modelo): encaminhar SOMENTE numero da Nidia; nao responder vagas/selecao (FR-014)
-- [ ] 4.2.6 Identidade "Consultor Virtual Oficial"; blocos curtos, 1 pergunta/msg (FR-013/015)
-- [ ] 4.2.7 Separacao estrutural sistema/usuario; conteudo do lead como nao-confiavel (SEC-LLM-1)
-- [ ] 4.2.8 Implementar `app/core/responder.py` (geracao com modelo de raciocinio, ancorada no grounding)
-- [ ] 4.2.9 Escrever testes dos 6 caminhos + recusa fora-da-base + verbatim + objecoes (cobertura dos AS de US1)
+- [x] 4.2.1 Implementar `app/core/flow.py` com os 6 caminhos do Mapa Mestre
+- [x] 4.2.2 Grounding estrito na hierarquia Mapa Mestre → Base Oficial → Banco de Objecoes → FAQ; recusa + handoff fora da base (FR-008, SC-008)
+- [x] 4.2.3 Verificacao de elegibilidade medica inflexivel (FR-009; "apenas facial" → nao elegivel HG360)
+- [x] 4.2.4 Apresentacoes oficiais na integra (verbatim, sem resumir — FR-010); objecoes EXCLUSIVAMENTE do Banco Oficial (FR-011)
+- [x] 4.2.5 Caminho 5 (paciente modelo): encaminhar SOMENTE numero da Nidia; nao responder vagas/selecao (FR-014)
+- [x] 4.2.6 Identidade "Consultor Virtual Oficial"; blocos curtos, 1 pergunta/msg (FR-013/015)
+- [x] 4.2.7 Separacao estrutural sistema/usuario; conteudo do lead como nao-confiavel (SEC-LLM-1)
+- [x] 4.2.8 Implementar `app/core/responder.py` (geracao com modelo de raciocinio, ancorada no grounding)
+- [x] 4.2.9 Escrever testes dos 6 caminhos + recusa fora-da-base + verbatim + objecoes (cobertura dos AS de US1)
 
 ### 4.3 Memoria e jornada sem atrito `[A]`
 
 Ref: spec.md FR-018/019/020/021; US2; Princípio III
 
-- [ ] 4.3.1 Implementar `app/core/memory.py` (historico duravel Postgres + janela quente Redis)
-- [ ] 4.3.2 Resumo rolante para janelas longas (50+ msgs sem estourar contexto — SC-002)
-- [ ] 4.3.3 Persistir/reutilizar variaveis (idioma, e medico, especialidade, experiencia, produto, etapa) e nunca repetir perguntas (FR-021)
-- [ ] 4.3.4 Recuperar contexto em novo ticket do mesmo contato (US2-AS4)
-- [ ] 4.3.5 Escrever testes (nao repete pergunta apos reabrir; coerencia em 50+ msgs; redirecionamento preserva dados)
+- [x] 4.3.1 Implementar `app/core/memory.py` (historico duravel Postgres + janela quente Redis)
+- [x] 4.3.2 Resumo rolante para janelas longas (50+ msgs sem estourar contexto — SC-002)
+- [x] 4.3.3 Persistir/reutilizar variaveis (idioma, e medico, especialidade, experiencia, produto, etapa) e nunca repetir perguntas (FR-021)
+- [x] 4.3.4 Recuperar contexto em novo ticket do mesmo contato (US2-AS4)
+- [x] 4.3.5 Escrever testes (nao repete pergunta apos reabrir; coerencia em 50+ msgs; redirecionamento preserva dados)
 
 ### 4.4 Transcricao de audio `[M]`
 
 Ref: spec.md FR-005; US5-AS3; SC-007
 
-- [ ] 4.4.1 Implementar transcricao (OpenAI) no `app/integrations/openai_client.py`
-- [ ] 4.4.2 Tratar falha de transcricao (pedir repeticao em texto — FR-005)
-- [ ] 4.4.3 Escrever testes (audio opus → texto processado; falha → mensagem de repeticao)
+- [x] 4.4.1 Implementar transcricao (OpenAI) no `app/integrations/openai_client.py`
+- [x] 4.4.2 Tratar falha de transcricao (pedir repeticao em texto — FR-005)
+- [x] 4.4.3 Escrever testes (audio opus → texto processado; falha → mensagem de repeticao)
 
 ---
 

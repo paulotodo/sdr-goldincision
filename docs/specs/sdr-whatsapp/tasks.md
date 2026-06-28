@@ -168,18 +168,18 @@ Ref: spec.md FR-005; US5-AS3; SC-007
 
 Ref: spec.md FR-016/017; contracts/outbound-chatmaster.md
 
-- [ ] 5.1.1 Implementar `app/integrations/chatmaster.py` (`POST sendOfficialData`, Bearer, body `{number,text}`)
-- [ ] 5.1.2 Suportar links de inscricao PT/EN/ES (Hotmart) e quick reply quando o fluxo exigir (FR-017)
-- [ ] 5.1.3 Escrever testes (envio mockado; variante de link por idioma correta)
+- [x] 5.1.1 Implementar `app/integrations/chatmaster.py` (`POST sendOfficialData`, Bearer, body `{number,text}`)
+- [x] 5.1.2 Suportar links de inscricao PT/EN/ES (Hotmart) e quick reply quando o fluxo exigir (FR-017)
+- [x] 5.1.3 Escrever testes (envio mockado; variante de link por idioma correta)
 
 ### 5.2 Handoff humano via API de tickets `[C]`
 
 Ref: spec.md FR-022/023/024; US3; SC-003; Princípio V
 
-- [ ] 5.2.1 Implementar transferencia de ticket para fila/conexao via API de tickets; destino resolvido por allowlist de filas (SEC-LLM-3)
-- [ ] 5.2.2 Cessar atuacao apos transferencia (nao enviar mais no ticket — FR-023) e verificar estado antes de agir (FR-024)
-- [ ] 5.2.3 Caminho 5 sem transferencia de ticket (canal direto Nidia — US3-AS6)
-- [ ] 5.2.4 Escrever testes (handoff explicito/por fluxo → 1 transferencia antes de qualquer msg; pos-handoff nao envia)
+- [x] 5.2.1 Implementar transferencia de ticket para fila/conexao via API de tickets; destino resolvido por allowlist de filas (SEC-LLM-3)
+- [x] 5.2.2 Cessar atuacao apos transferencia (nao enviar mais no ticket — FR-023) e verificar estado antes de agir (FR-024)
+- [x] 5.2.3 Caminho 5 sem transferencia de ticket (canal direto Nidia — US3-AS6)
+- [x] 5.2.4 Escrever testes (handoff explicito/por fluxo → 1 transferencia antes de qualquer msg; pos-handoff nao envia)
 
 ---
 
@@ -189,17 +189,17 @@ Ref: spec.md FR-022/023/024; US3; SC-003; Princípio V
 
 Ref: spec.md FR-025, US4-AS5; plan.md SEC-ADM-1/2; admin-courses.md
 
-- [ ] 6.1.1 Implementar middleware/deps de token (deny-by-default em `/admin/*`; sem token → 401)
-- [ ] 6.1.2 Comparacao de token em tempo constante (anti timing — SEC-ADM-1) + rate limiting (anti brute-force — SEC-ADM-2)
-- [ ] 6.1.3 Escrever testes (sem token → 401; token invalido → 401; valido → acesso)
+- [x] 6.1.1 Implementar middleware/deps de token (deny-by-default em `/admin/*`; sem token → 401)
+- [x] 6.1.2 Comparacao de token em tempo constante (anti timing — SEC-ADM-1) + rate limiting (anti brute-force — SEC-ADM-2)
+- [x] 6.1.3 Escrever testes (sem token → 401; token invalido → 401; valido → acesso)
 
 ### 6.2 CRUD de cursos `[A]`
 
 Ref: spec.md FR-025/026; US4-AS1..AS6; admin-courses.md
 
-- [ ] 6.2.1 Implementar `app/api/admin.py` (POST/GET/PUT/DELETE `/admin/cursos`) com Pydantic estrito (anti mass-assignment — SEC-ADM-4)
-- [ ] 6.2.2 Leitura do catalogo em runtime pelo motor, sem redeploy (FR-026)
-- [ ] 6.2.3 Escrever testes CRUD (criar → 201 + aparece no catalogo; update/delete refletem em conversas novas; SC-004)
+- [x] 6.2.1 Implementar `app/api/admin.py` (POST/GET/PUT/DELETE `/admin/cursos`) com Pydantic estrito (anti mass-assignment — SEC-ADM-4)
+- [x] 6.2.2 Leitura do catalogo em runtime pelo motor, sem redeploy (FR-026)
+- [x] 6.2.3 Escrever testes CRUD (criar → 201 + aparece no catalogo; update/delete refletem em conversas novas; SC-004)
 
 ---
 
@@ -209,10 +209,10 @@ Ref: spec.md FR-025/026; US4-AS1..AS6; admin-courses.md
 
 Ref: spec.md FR-033/034; US7
 
-- [ ] 7.1.1 Implementar `app/observability/log.py` (JSON: ticket_id, contact_number, stage, timestamp, latency_ms; LLM: model_used, tokens_in, tokens_out)
-- [ ] 7.1.2 Registrar eventos de handoff (ticket_id, handoff_type, destino, motivo — FR-034)
-- [ ] 7.1.3 Tratar erro de LLM/ChatMaster com log + mensagem ao usuario sem expor detalhes tecnicos (US7-AS3)
-- [ ] 7.1.4 Escrever testes (entrada de log por mensagem processada; entrada de handoff; erro logado)
+- [x] 7.1.1 Implementar `app/observability/log.py` (JSON: ticket_id, contact_number, stage, timestamp, latency_ms; LLM: model_used, tokens_in, tokens_out)
+- [x] 7.1.2 Registrar eventos de handoff (ticket_id, handoff_type, destino, motivo — FR-034)
+- [x] 7.1.3 Tratar erro de LLM/ChatMaster com log + mensagem ao usuario sem expor detalhes tecnicos (US7-AS3)
+- [x] 7.1.4 Escrever testes (entrada de log por mensagem processada; entrada de handoff; erro logado)
 
 ---
 

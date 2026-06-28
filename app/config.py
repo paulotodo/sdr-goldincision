@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # --- ChatMaster ---
     chatmaster_token: str = ""
     chatmaster_base_url: str = "https://api2.chatmasterveloz.com"
+    # API de tickets (handoff); ajustavel via env sem redeploy de codigo
+    chatmaster_ticket_base_url: str = "https://clihelper.chatmasterveloz.com"
+    # Template de path para transferencia; {chamado_id} e substituido em runtime
+    chatmaster_transfer_path_tpl: str = "/api/v1/tickets/{chamado_id}/transfer"
 
     # --- Admin API ---
     admin_token: str = ""

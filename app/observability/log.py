@@ -1,25 +1,206 @@
 """
-Logging estruturado em JSON para observabilidade (FR-033/034).
+Logging estruturado em JSON para observabilidade (FR-033/034, US7).
 
-Emite eventos em stdout como JSON lines:
-- ticket_id, contact_number, stage, timestamp, latency_ms
-- Para chamadas LLM: model_used, tokens_in, tokens_out
-- Para handoff: handoff_type, destino, motivo
+Emite eventos em stdout como JSON lines — compativel com qualquer
+coletor de logs (Loki, CloudWatch, ELK).
 
-Nunca expoe detalhes tecnicos internos ao usuario (US7-AS3).
-Implementacao completa: FASE 7, task 7.1.
+Campos por tipo de evento:
+- webhook_in : ticket_id, contact_number, stage, latency_ms
+- llm_call   : ticket_id, stage, model_used, tokens_in, tokens_out, latency_ms
+- message_out: ticket_id, contact_number, stage
+- handoff    : ticket_id, contact_number, handoff_type, destino, motivo
+- erro       : ticket_id, stage, detalhe (sem expor stack trace ao usuario)
+
+Regras de seguranca:
+- NUNCA logar secrets (token, openai key) — FR-032.
+- NUNCA expor detalhe tecnico ao usuario — US7-AS3.
+- contact_number e logado com mascara parcial (primeiros 4 digitos + **).
 """
 from __future__ import annotations
 
 import json
 import logging
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Generator, Optional
 
 logger = logging.getLogger(__name__)
 
+# Campos que NUNCA devem aparecer em logs (filtragem defensiva)
+_FORBIDDEN_KEYS = frozenset(
+    {
+        "token", "secret", "password", "senha", "openai_api_key",
+        "chatmaster_token", "admin_token", "webhook_token",
+        "authorization", "bearer",
+    }
+)
 
+
+def _mask_number(number: Optional[str]) -> Optional[str]:
+    """Mascara parcial do numero de telefone (primeiros 4 digitos + **)."""
+    if not number:
+        return number
+    visible = number[:4]
+    return f"{visible}****"
+
+
+def _scrub(obj: Any, depth: int = 0) -> Any:
+    """Remove recursivamente chaves suspeitas de dict (defesa em profundidade)."""
+    if depth > 5:
+        return obj
+    if isinstance(obj, dict):
+        return {
+            k: _scrub(v, depth + 1)
+            for k, v in obj.items()
+            if k.lower() not in _FORBIDDEN_KEYS
+        }
+    if isinstance(obj, list):
+        return [_scrub(i, depth + 1) for i in obj]
+    return obj
+
+
+def _emit(event: dict) -> None:
+    """Emite evento como JSON line em stdout (via print para compatibilidade)."""
+    try:
+        safe = _scrub(event)
+        print(json.dumps(safe, ensure_ascii=False, default=str), flush=True)
+    except Exception:
+        # Nunca propagar erro de logging
+        pass
+
+
+def log_webhook_in(
+    ticket_id: Optional[int] = None,
+    contact_number: Optional[str] = None,
+    stage: Optional[str] = None,
+    latency_ms: Optional[int] = None,
+    num_mensagens: Optional[int] = None,
+) -> None:
+    """Registra evento de recepcao de webhook."""
+    event: dict = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tipo": "webhook_in",
+    }
+    if ticket_id is not None:
+        event["ticket_id"] = ticket_id
+    if contact_number is not None:
+        event["contact_number"] = _mask_number(contact_number)
+    if stage is not None:
+        event["stage"] = stage
+    if latency_ms is not None:
+        event["latency_ms"] = latency_ms
+    if num_mensagens is not None:
+        event["num_mensagens"] = num_mensagens
+    _emit(event)
+
+
+def log_llm_call(
+    ticket_id: Optional[int] = None,
+    stage: Optional[str] = None,
+    model_used: Optional[str] = None,
+    tokens_in: Optional[int] = None,
+    tokens_out: Optional[int] = None,
+    latency_ms: Optional[int] = None,
+) -> None:
+    """Registra chamada ao LLM com uso/custo de tokens (FR-033)."""
+    event: dict = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tipo": "llm_call",
+    }
+    if ticket_id is not None:
+        event["ticket_id"] = ticket_id
+    if stage is not None:
+        event["stage"] = stage
+    if model_used is not None:
+        event["model_used"] = model_used
+    if tokens_in is not None:
+        event["tokens_in"] = tokens_in
+    if tokens_out is not None:
+        event["tokens_out"] = tokens_out
+    if latency_ms is not None:
+        event["latency_ms"] = latency_ms
+    _emit(event)
+
+
+def log_message_out(
+    ticket_id: Optional[int] = None,
+    contact_number: Optional[str] = None,
+    stage: Optional[str] = None,
+    num_blocos: Optional[int] = None,
+) -> None:
+    """Registra envio de mensagem ao lead."""
+    event: dict = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tipo": "message_out",
+    }
+    if ticket_id is not None:
+        event["ticket_id"] = ticket_id
+    if contact_number is not None:
+        event["contact_number"] = _mask_number(contact_number)
+    if stage is not None:
+        event["stage"] = stage
+    if num_blocos is not None:
+        event["num_blocos"] = num_blocos
+    _emit(event)
+
+
+def log_handoff(
+    ticket_id: Optional[int] = None,
+    contact_number: Optional[str] = None,
+    handoff_type: str = "fila",
+    destino: Optional[str] = None,
+    motivo: Optional[str] = None,
+) -> None:
+    """
+    Registra evento de handoff (FR-034).
+
+    handoff_type: 'fila' | 'conexao' | 'paciente_modelo' | 'end'
+    """
+    event: dict = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tipo": "handoff",
+        "handoff_type": handoff_type,
+    }
+    if ticket_id is not None:
+        event["ticket_id"] = ticket_id
+    if contact_number is not None:
+        event["contact_number"] = _mask_number(contact_number)
+    if destino is not None:
+        event["destino"] = destino
+    if motivo is not None:
+        event["motivo"] = motivo
+    _emit(event)
+
+
+def log_erro(
+    ticket_id: Optional[int] = None,
+    stage: Optional[str] = None,
+    tipo_erro: str = "erro",
+    detalhe: Optional[str] = None,
+    contact_number: Optional[str] = None,
+) -> None:
+    """
+    Registra erro tecnico (FR-033, US7-AS3).
+
+    O 'detalhe' e para logs internos APENAS — nunca exposto ao usuario.
+    """
+    event: dict = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tipo": tipo_erro,
+    }
+    if ticket_id is not None:
+        event["ticket_id"] = ticket_id
+    if stage is not None:
+        event["stage"] = stage
+    if contact_number is not None:
+        event["contact_number"] = _mask_number(contact_number)
+    if detalhe:
+        event["detalhe"] = detalhe  # tecnico: para logs, nao para o lead
+    _emit(event)
+
+
+# Alias de compatibilidade (mantido para nao quebrar chamadas anteriores)
 def log_event(
     tipo: str,
     ticket_id: Optional[int] = None,
@@ -32,19 +213,17 @@ def log_event(
     detalhe: Optional[dict] = None,
 ) -> None:
     """
-    Emite evento de observabilidade como JSON line em stdout.
-
-    Tipos padrao: webhook_in, llm_call, message_out, handoff, erro
-    Implementacao completa: FASE 7.
+    API generica de evento. Preferir as funcoes especificas acima.
+    Mantida para retrocompatibilidade.
     """
-    event = {
+    event: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "tipo": tipo,
     }
     if ticket_id is not None:
         event["ticket_id"] = ticket_id
     if contact_number is not None:
-        event["contact_number"] = contact_number
+        event["contact_number"] = _mask_number(contact_number)
     if stage is not None:
         event["stage"] = stage
     if latency_ms is not None:
@@ -56,7 +235,36 @@ def log_event(
     if tokens_out is not None:
         event["tokens_out"] = tokens_out
     if detalhe is not None:
-        event["detalhe"] = detalhe
+        event["detalhe"] = _scrub(detalhe)
+    _emit(event)
 
-    # Emite como JSON line (capturado por sistema de logging)
-    print(json.dumps(event, ensure_ascii=False, default=str))
+
+@contextmanager
+def timed_llm_call(
+    ticket_id: Optional[int] = None,
+    stage: Optional[str] = None,
+    model_used: Optional[str] = None,
+) -> Generator[dict, None, None]:
+    """
+    Context manager que mede latencia de chamada LLM e emite o evento ao final.
+
+    Uso:
+        with timed_llm_call(ticket_id=42, stage="apresentacao", model_used="gpt-4o") as ctx:
+            resp = await openai_client.chat(...)
+            ctx["tokens_in"] = resp.usage.prompt_tokens
+            ctx["tokens_out"] = resp.usage.completion_tokens
+    """
+    ctx: dict = {}
+    t0 = time.monotonic()
+    try:
+        yield ctx
+    finally:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        log_llm_call(
+            ticket_id=ticket_id,
+            stage=stage,
+            model_used=model_used or ctx.get("model_used"),
+            tokens_in=ctx.get("tokens_in"),
+            tokens_out=ctx.get("tokens_out"),
+            latency_ms=latency_ms,
+        )

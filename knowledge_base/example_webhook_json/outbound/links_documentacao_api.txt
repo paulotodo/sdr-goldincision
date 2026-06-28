@@ -1,0 +1,32 @@
+envio mensagem
+  https://clihelper.chatmasterveloz.com/principal/apis/mensagem/api-oficial-mensagem/
+
+  envio template
+  https://clihelper.chatmasterveloz.com/principal/apis/mensagem/api-oficial-mensagem-template/
+
+  envio template variavel
+  https://clihelper.chatmasterveloz.com/principal/apis/mensagem/api-oficial-mensagem-template-sem-variavel/
+
+  enviar imagem por url
+  https://clihelper.chatmasterveloz.com/principal/apis/midias/api-oficial-enviar-imagem-por-url/
+
+  enviar audio por url
+  https://clihelper.chatmasterveloz.com/principal/apis/midias/api-oficial-enviar-audio-por-url/
+
+  enviar video por url
+  https://clihelper.chatmasterveloz.com/principal/apis/midias/api-oficial-enviar-video-por-url/
+
+  enviar documento por url
+  https://clihelper.chatmasterveloz.com/principal/apis/midias/api-oficial-enviar-documento-por-url/
+
+  enviar botao
+  https://clihelper.chatmasterveloz.com/principal/apis/botoes-no-whatsapp/api-oficial-botao-url/
+
+  enviar botao quick replay
+  https://clihelper.chatmasterveloz.com/principal/apis/botoes-no-whatsapp/api-oficial-botao-quick-reply/
+
+  api gerenciamento de tickets
+  https://clihelper.chatmasterveloz.com/principal/apis/ticket/
+
+  api gerencimento crm
+  https://clihelper.chatmasterveloz.com/principal/apis/crm/

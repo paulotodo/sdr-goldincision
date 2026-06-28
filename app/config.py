@@ -42,10 +42,27 @@ class Settings(BaseSettings):
     # --- ChatMaster ---
     chatmaster_token: str = ""
     chatmaster_base_url: str = "https://api2.chatmasterveloz.com"
-    # API de tickets (handoff); ajustavel via env sem redeploy de codigo
-    chatmaster_ticket_base_url: str = "https://clihelper.chatmasterveloz.com"
-    # Template de path para transferencia; {chamado_id} e substituido em runtime
-    chatmaster_transfer_path_tpl: str = "/api/v1/tickets/{chamado_id}/transfer"
+    # Handoff humano via API "Atualizar Ticket" (POST {base}/api/tickets/updateAPI):
+    # preenche queueId com o id da fila de atendimento humano, userId=null e
+    # status="pending". O id da fila e ESPECIFICO do deploy (operador define no
+    # ChatMaster) — por isso vem de config, nunca do LLM (SEC-LLM-3).
+    # Fila humana padrao (fallback quando o destino logico nao tem mapeamento):
+    handoff_queue_id_default: Optional[int] = None
+    # Mapa opcional destino-logico -> queueId, como JSON. Ex.:
+    #   {"consultores": 78, "presencial": 80, "licenciamento": 81}
+    handoff_queue_ids_json: str = ""
+
+    @property
+    def handoff_queue_ids(self) -> dict[str, int]:
+        """Mapa destino-logico -> queueId, parseado de handoff_queue_ids_json."""
+        if not self.handoff_queue_ids_json.strip():
+            return {}
+        import json as _json
+        try:
+            raw = _json.loads(self.handoff_queue_ids_json)
+            return {str(k): int(v) for k, v in raw.items()}
+        except (ValueError, TypeError):
+            return {}
 
     # --- Admin API ---
     admin_token: str = ""

@@ -993,8 +993,8 @@ def test_mocks_openai_e_chatmaster_padrao():
     cm = ChatMasterClient(
         base_url="https://fake",
         token="",
-        ticket_base_url="https://fake",
-        transfer_path_tpl="/api/v1/tickets/{chamado_id}/transfer",
+        handoff_queue_ids={"consultores": 78},
+        default_queue_id=78,
     )
     assert cm is not None
 

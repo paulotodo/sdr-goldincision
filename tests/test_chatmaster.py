@@ -27,11 +27,14 @@ from app.integrations.chatmaster import (
 # ---------------------------------------------------------------------------
 
 def _make_client(token: str = "tok-test") -> ChatMasterClient:
+    # Mapeia todos os destinos logicos da allowlist para filas reais de exemplo,
+    # com fila humana padrao de fallback (config do operador no deploy real).
+    queue_map = {dest: 70 + i for i, dest in enumerate(sorted(HANDOFF_QUEUE_ALLOWLIST))}
     return ChatMasterClient(
         base_url="https://api2.chatmasterveloz.com",
         token=token,
-        ticket_base_url="https://clihelper.chatmasterveloz.com",
-        transfer_path_tpl="/api/v1/tickets/{chamado_id}/transfer",
+        handoff_queue_ids=queue_map,
+        default_queue_id=78,
     )
 
 
@@ -171,28 +174,25 @@ async def test_send_message_blocks_texto_curto_envia_um_post():
 
 @pytest.mark.asyncio
 async def test_transfer_ticket_sucesso():
-    """transfer_ticket envia PUT com destino valido."""
+    """transfer_ticket envia POST updateAPI com queueId/userId=null/status=pending."""
     client = _make_client()
 
     mock_resp = _mock_response(200)
     mock_http = AsyncMock()
-    mock_http.put = AsyncMock(return_value=mock_resp)
+    mock_http.post = AsyncMock(return_value=mock_resp)
     client._client = mock_http
 
-    await client.transfer_ticket(
-        chamado_id=42,
-        destination="consultores",
-        queue_id=7,
-        company_id=1,
-        motivo="Interesse em HG360 presencial",
-    )
+    await client.transfer_ticket(chamado_id=42, destination="consultores")
 
-    mock_http.put.assert_awaited_once()
-    call_args = mock_http.put.call_args
-    assert "42" in call_args[0][0]  # chamado_id no path
+    mock_http.post.assert_awaited_once()
+    call_args = mock_http.post.call_args
+    assert call_args[0][0].endswith("/api/tickets/updateAPI")
     body = call_args[1]["json"]
-    assert body["queueId"] == 7
-    assert body["companyId"] == 1
+    assert body["ticketId"] == "42"
+    assert body["status"] == "pending"
+    assert body["userId"] is None  # sem atendente atrelado (fila humana)
+    # consultores -> queueId real configurado (nunca vindo do LLM)
+    assert body["queueId"] == str(client._handoff_queue_ids["consultores"])
 
 
 @pytest.mark.asyncio
@@ -208,7 +208,23 @@ async def test_transfer_ticket_destino_fora_da_allowlist_rejeitado():
         )
 
     # Nunca deve ter chamado a API
-    client._client.put.assert_not_called()
+    client._client.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_transfer_ticket_sem_queue_configurada_rejeita():
+    """Sem queueId configurado para o destino, levanta ValueError (nao chama API)."""
+    client = ChatMasterClient(
+        base_url="https://api2.chatmasterveloz.com",
+        token="tok",
+        handoff_queue_ids={},   # nenhum mapeamento
+        default_queue_id=None,  # nenhuma fila padrao
+    )
+    client._client = AsyncMock()
+
+    with pytest.raises(ValueError, match="Sem queueId configurado"):
+        await client.transfer_ticket(chamado_id=5, destination="consultores")
+    client._client.post.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -218,13 +234,13 @@ async def test_transfer_ticket_todos_destinos_da_allowlist_sao_validos():
 
     mock_resp = _mock_response(200)
     mock_http = AsyncMock()
-    mock_http.put = AsyncMock(return_value=mock_resp)
+    mock_http.post = AsyncMock(return_value=mock_resp)
     client._client = mock_http
 
     for dest in HANDOFF_QUEUE_ALLOWLIST:
         await client.transfer_ticket(chamado_id=1, destination=dest)
 
-    assert mock_http.put.await_count == len(HANDOFF_QUEUE_ALLOWLIST)
+    assert mock_http.post.await_count == len(HANDOFF_QUEUE_ALLOWLIST)
 
 
 @pytest.mark.asyncio
@@ -234,7 +250,7 @@ async def test_transfer_ticket_erro_http_propaga():
 
     mock_resp = _mock_response(500)
     mock_http = AsyncMock()
-    mock_http.put = AsyncMock(return_value=mock_resp)
+    mock_http.post = AsyncMock(return_value=mock_resp)
     client._client = mock_http
 
     with pytest.raises(httpx.HTTPStatusError):

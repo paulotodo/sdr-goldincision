@@ -46,9 +46,30 @@ abstrato é um `OutboundClient` com método por recurso).
 
 ## 3. Gestão de ticket / Handoff (FR-022, FR-023, FR-024)
 
-Base: `https://clihelper.chatmasterveloz.com/principal/apis/ticket/`. Operações:
-criar, obter, atualizar, atualizar tags, encerrar, **transferir para fila**,
-**transferir entre conexões**.
+**Contrato real (API "Atualizar Ticket")** — confirmado pelo operador via
+`clihelper.chatmasterveloz.com/principal/apis/ticket/api-atualizar-ticket/`:
+
+```
+POST https://api2.chatmasterveloz.com/api/tickets/updateAPI
+Authorization: Bearer <CHATMASTER_TOKEN>
+Content-Type: application/json
+{
+  "ticketId": "<id>",
+  "status": "open" | "pending" | "closed",
+  "userId": <id> | null,
+  "queueId": <id> | null,
+  "typebot_sessionId": "",
+  "customA": "",
+  "customB": ""
+}
+```
+
+**Transferir para fila de atendimento humano**: `queueId` = id da fila,
+`userId` = null (sem atendente atrelado), `status` = `"pending"`.
+
+O `queueId` é específico do deploy e vem SEMPRE da config do operador
+(`HANDOFF_QUEUE_ID_DEFAULT` / `HANDOFF_QUEUE_IDS_JSON`), mapeado a partir do
+destino lógico do fluxo — o LLM nunca fornece um `queueId` arbitrário (SEC-LLM-3).
 
 ### Fluxo de handoff
 

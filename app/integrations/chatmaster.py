@@ -7,27 +7,21 @@ Outbound (FR-016/017):
   Auth: Bearer CHATMASTER_TOKEN (via secret)
 - Mensagens longas quebradas em blocos; 1 pergunta por envio.
 
-Handoff de tickets (FR-022/023/024):
-- API de tickets: https://clihelper.chatmasterveloz.com/principal/apis/ticket/
-- Endpoints de transferencia de fila/conexao derivados da doc oficial
-  (knowledge_base/example_webhook_json/outbound/links_documentacao_api.txt).
-- O payload exato de transferencia NAO e documentado no contrato entregue;
-  modelado de forma configuravel (SUPOSICAO documentada abaixo).
-
-SUPOSICAO HANDOFF (documentada — nao inventada):
-  A doc aponta clihelper.chatmasterveloz.com/principal/apis/ticket/ sem
-  detalhar o corpo exato de "transferir para fila". Adotamos a convencao
-  padrao de CRMs baseados em WhatsApp-business:
-    PUT /api/v1/tickets/{chamado_id}/transfer
-    Body: {"queueId": <int>, "companyId": <int>}
-  O path e os nomes de campo sao configurados via env
-  (CHATMASTER_TICKET_BASE_URL, CHATMASTER_TRANSFER_PATH_TPL).
-  Ajuste para o payload real sem redeployar o codigo — apenas
-  atualizar a env var (ex: mudar path ou key names).
+Handoff de tickets (FR-022/023/024) — CONTRATO REAL (API "Atualizar Ticket"):
+- POST https://api2.chatmasterveloz.com/api/tickets/updateAPI
+  Auth: Bearer CHATMASTER_TOKEN (via secret)
+  Body: {"ticketId": "<id>", "status": "open|pending|closed",
+         "userId": <id|null>, "queueId": <id|null>,
+         "typebot_sessionId": "", "customA": "", "customB": ""}
+  Ref: clihelper.chatmasterveloz.com/principal/apis/ticket/api-atualizar-ticket/
+- Para transferir a uma FILA de atendimento humano: queueId = id da fila,
+  userId = null (nenhum atendente atrelado), status = "pending".
 
 Seguranca:
 - Token Bearer via secret (NUNCA hardcoded ou logado — FR-032).
-- Destino de handoff SEMPRE validado na allowlist (SEC-LLM-3).
+- O queueId vem SEMPRE da config do operador (handoff_queue_ids/
+  handoff_queue_id_default), mapeado a partir do destino LOGICO do fluxo.
+  O LLM nunca fornece um queueId arbitrario (SEC-LLM-3).
 - Guarda dupla contra envio em ticket em_handoff (FR-023).
 """
 from __future__ import annotations
@@ -131,14 +125,15 @@ class ChatMasterClient:
         self,
         base_url: str,
         token: str,
-        ticket_base_url: str = "https://clihelper.chatmasterveloz.com",
-        transfer_path_tpl: str = "/api/v1/tickets/{chamado_id}/transfer",
+        handoff_queue_ids: Optional[dict[str, int]] = None,
+        default_queue_id: Optional[int] = None,
         timeout_seconds: float = 15.0,
     ):
         self._base_url = base_url.rstrip("/")
         self._token = token
-        self._ticket_base_url = ticket_base_url.rstrip("/")
-        self._transfer_path_tpl = transfer_path_tpl
+        # Mapa destino-logico -> queueId e fila padrao (config do operador).
+        self._handoff_queue_ids = handoff_queue_ids or {}
+        self._default_queue_id = default_queue_id
         self._timeout = timeout_seconds
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -214,19 +209,20 @@ class ChatMasterClient:
         self,
         chamado_id: int,
         destination: str,
-        queue_id: Optional[int] = None,
-        company_id: Optional[int] = None,
-        motivo: Optional[str] = None,
+        status: str = "pending",
     ) -> None:
         """
-        Transfere ticket para fila/conexao via API de tickets.
+        Transfere o ticket para uma FILA de atendimento humano via a API
+        oficial "Atualizar Ticket" (POST /api/tickets/updateAPI).
 
-        Seguranca (SEC-LLM-3): o `destination` DEVE estar na allowlist.
-        O agente nunca aceita texto livre do LLM como destino.
+        Resolve o `destination` LOGICO (ex.: "consultores", "presencial",
+        "licenciamento") para o queueId real configurado pelo operador
+        (handoff_queue_ids -> fallback default_queue_id). O LLM nunca informa
+        um queueId arbitrario (SEC-LLM-3): o destino so pode ser uma chave
+        conhecida da allowlist/config; o id concreto vem sempre da config.
 
-        SUPOSICAO: o endpoint e PUT {ticket_base_url}{path} com body
-        {"queueId": queue_id, "companyId": company_id}. Ajustar via env
-        se o contrato real diferir (zero redeploy de codigo).
+        Conforme a doc: para fila humana sem atendente atrelado, envia
+        queueId=<id>, userId=null, status="pending".
         """
         if destination not in HANDOFF_QUEUE_ALLOWLIST:
             raise ValueError(
@@ -234,26 +230,36 @@ class ChatMasterClient:
                 f"Permitidos: {sorted(HANDOFF_QUEUE_ALLOWLIST)}"
             )
 
-        client = self._ensure_client()
-        path = self._transfer_path_tpl.format(chamado_id=chamado_id)
-        url = f"{self._ticket_base_url}{path}"
+        queue_id = self._handoff_queue_ids.get(destination, self._default_queue_id)
+        if queue_id is None:
+            raise ValueError(
+                f"Sem queueId configurado para destino '{destination}'. "
+                "Defina HANDOFF_QUEUE_IDS_JSON e/ou HANDOFF_QUEUE_ID_DEFAULT."
+            )
+        if status not in ("open", "pending", "closed"):
+            raise ValueError(f"status invalido: {status}")
 
-        body: dict = {}
-        if queue_id is not None:
-            body["queueId"] = queue_id
-        if company_id is not None:
-            body["companyId"] = company_id
-        if motivo:
-            body["motivo"] = motivo  # campo opcional; ignorado se API nao suportar
+        client = self._ensure_client()
+        url = f"{self._base_url}/api/tickets/updateAPI"
+        body: dict = {
+            "ticketId": str(chamado_id),
+            "status": status,
+            "userId": None,        # sem atendente atrelado (fila humana)
+            "queueId": str(queue_id),
+            "typebot_sessionId": "",
+            "customA": "",
+            "customB": "",
+        }
 
         logger.info(
-            "chatmaster: transfer_ticket chamado_id=%s destination=%s queue_id=%s",
+            "chatmaster: transfer_ticket ticketId=%s destination=%s queueId=%s status=%s",
             chamado_id,
             destination,
             queue_id,
+            status,
         )
 
-        resp = await client.put(url, json=body)
+        resp = await client.post(url, json=body)
         if resp.status_code >= 400:
             logger.error(
                 "chatmaster: transfer_ticket falhou status=%d body=%s",
@@ -283,23 +289,15 @@ def make_chatmaster_client(settings) -> ChatMasterClient:
 
     Variaveis relevantes:
     - settings.chatmaster_token     : Bearer token (via secret)
-    - settings.chatmaster_base_url  : base de envio (api2.chatmasterveloz.com)
-    - settings.chatmaster_ticket_base_url : base de tickets (clihelper; via env)
-    - settings.chatmaster_transfer_path_tpl : template de path de transferencia
+    - settings.chatmaster_base_url  : base de envio/tickets (api2.chatmasterveloz.com)
+    - settings.handoff_queue_ids    : mapa destino-logico -> queueId (config)
+    - settings.handoff_queue_id_default : fila humana padrao (fallback)
     """
-    ticket_base = getattr(
-        settings,
-        "chatmaster_ticket_base_url",
-        "https://clihelper.chatmasterveloz.com",
-    )
-    transfer_tpl = getattr(
-        settings,
-        "chatmaster_transfer_path_tpl",
-        "/api/v1/tickets/{chamado_id}/transfer",
-    )
+    queue_ids = getattr(settings, "handoff_queue_ids", {}) or {}
+    default_qid = getattr(settings, "handoff_queue_id_default", None)
     return ChatMasterClient(
         base_url=settings.chatmaster_base_url,
         token=settings.chatmaster_token,
-        ticket_base_url=ticket_base,
-        transfer_path_tpl=transfer_tpl,
+        handoff_queue_ids=queue_ids,
+        default_queue_id=default_qid,
     )

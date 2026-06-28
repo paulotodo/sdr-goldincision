@@ -55,6 +55,9 @@ services:
       DEBOUNCE_SECONDS: "${DEBOUNCE_SECONDS:-8}"
       CHATMASTER_BASE_URL: "${CHATMASTER_BASE_URL:-https://api2.chatmasterveloz.com}"
       NIDIA_PHONE: "${NIDIA_PHONE:-}"
+      # Handoff humano (API Atualizar Ticket): queueId da fila humana.
+      HANDOFF_QUEUE_ID_DEFAULT: "${HANDOFF_QUEUE_ID_DEFAULT:-}"
+      HANDOFF_QUEUE_IDS_JSON: "${HANDOFF_QUEUE_IDS_JSON:-}"
     deploy:
       replicas: 1
       restart_policy:

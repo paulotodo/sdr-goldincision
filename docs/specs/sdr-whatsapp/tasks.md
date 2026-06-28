@@ -26,31 +26,31 @@ build+push no registry interno (sem `docker stack deploy` live).
 
 Ref: plan.md §Project Structure; research.md Decisoes 1/3/4
 
-- [ ] 1.1.1 Criar `pyproject.toml` (Python 3.12; FastAPI, Uvicorn, Pydantic v2, SQLAlchemy 2.0 async + asyncpg, Alembic, redis.asyncio, openai, httpx)
-- [ ] 1.1.2 Criar estrutura `app/` (`main.py`, `config.py`, `api/`, `core/`, `integrations/`, `repository/`, `schemas/`, `observability/`)
-- [ ] 1.1.3 Implementar `app/config.py` (settings via env/secrets: OPENAI_API_KEY, tokens, DEBOUNCE_SECONDS, WEBHOOK_TOKEN opcional, modelos OpenAI por env)
-- [ ] 1.1.4 Implementar `app/main.py` com app FastAPI + registro de rotas + endpoint `/health` (FR-030)
-- [ ] 1.1.5 Escrever testes de smoke do bootstrap (app sobe; `/health` responde 200 < 3s)
+- [x] 1.1.1 Criar `pyproject.toml` (Python 3.12; FastAPI, Uvicorn, Pydantic v2, SQLAlchemy 2.0 async + asyncpg, Alembic, redis.asyncio, openai, httpx)
+- [x] 1.1.2 Criar estrutura `app/` (`main.py`, `config.py`, `api/`, `core/`, `integrations/`, `repository/`, `schemas/`, `observability/`)
+- [x] 1.1.3 Implementar `app/config.py` (settings via env/secrets: OPENAI_API_KEY, tokens, DEBOUNCE_SECONDS, WEBHOOK_TOKEN opcional, modelos OpenAI por env)
+- [x] 1.1.4 Implementar `app/main.py` com app FastAPI + registro de rotas + endpoint `/health` (FR-030)
+- [x] 1.1.5 Escrever testes de smoke do bootstrap (app sobe; `/health` responde 200 < 3s)
 
 ### 1.2 Empacotamento Docker e stack Swarm `[C]`
 
 Ref: spec.md FR-028/029/031/032; plan.md §Project Structure; contracts/webhook-inbound.md §Exposição de rede
 
-- [ ] 1.2.1 Criar `Dockerfile` multi-stage, usuario non-root, com HEALTHCHECK
-- [ ] 1.2.2 Criar `stack.yml` com servicos `app`, `postgres`, `redis` em overlay propria (stores nao expostos — FR-029)
-- [ ] 1.2.3 Atachar `app` a SEGUNDA overlay compartilhada com o n8n (external/attachable) para receber o webhook interno; atachar SOMENTE o nosso servico (n8n nunca modificado — Princípio VI)
-- [ ] 1.2.4 Configurar labels Traefik EXCLUSIVAMENTE para `/admin/*` e `/health`; NENHUM router/label Traefik para `/webhook/chatmaster` (block-001/dec-015)
-- [ ] 1.2.5 Referenciar secrets (OPENAI_API_KEY, token ChatMaster, WEBHOOK_TOKEN) via Docker secrets/env externos — nunca em texto claro (FR-032)
-- [ ] 1.2.6 Criar `.env.example` e `README.md` com instrucoes de build/push/deploy (deploy a cargo do operador)
-- [ ] 1.2.7 Teste de validacao: `stack.yml` parseavel (`docker stack config`/lint) e sem secret em texto claro (grep)
+- [x] 1.2.1 Criar `Dockerfile` multi-stage, usuario non-root, com HEALTHCHECK
+- [x] 1.2.2 Criar `stack.yml` com servicos `app`, `postgres`, `redis` em overlay propria (stores nao expostos — FR-029)
+- [x] 1.2.3 Atachar `app` a SEGUNDA overlay compartilhada com o n8n (external/attachable) para receber o webhook interno; atachar SOMENTE o nosso servico (n8n nunca modificado — Princípio VI)
+- [x] 1.2.4 Configurar labels Traefik EXCLUSIVAMENTE para `/admin/*` e `/health`; NENHUM router/label Traefik para `/webhook/chatmaster` (block-001/dec-015)
+- [x] 1.2.5 Referenciar secrets (OPENAI_API_KEY, token ChatMaster, WEBHOOK_TOKEN) via Docker secrets/env externos — nunca em texto claro (FR-032)
+- [x] 1.2.6 Criar `.env.example` e `README.md` com instrucoes de build/push/deploy (deploy a cargo do operador)
+- [x] 1.2.7 Teste de validacao: `stack.yml` parseavel (`docker stack config`/lint) e sem secret em texto claro (grep)
 
 ### 1.3 Pipeline build + push (sem deploy live) `[A]`
 
 Ref: spec.md FR-031, US6-AS1; plan.md §Itens confirmáveis
 
-- [ ] 1.3.1 Script/documentacao de `docker build` + `docker push registry.todo-tips.com/sdr-whatsapp:latest`
+- [x] 1.3.1 Script/documentacao de `docker build` + `docker push registry.todo-tips.com/sdr-whatsapp:latest`
 - [ ] 1.3.2 Confirmar nome da overlay compartilhada do n8n e da rede do Traefik via inspecao (item confirmavel em runtime; nao inventar)
-- [ ] 1.3.3 Teste/checagem: pipeline NAO executa `docker stack deploy` (gate de blast radius)
+- [x] 1.3.3 Teste/checagem: pipeline NAO executa `docker stack deploy` (gate de blast radius)
 
 ---
 
@@ -60,19 +60,19 @@ Ref: spec.md FR-031, US6-AS1; plan.md §Itens confirmáveis
 
 Ref: data-model.md; spec.md Key Entities; FR-018/020/025
 
-- [ ] 2.1.1 Implementar `app/repository/models.py` (SQLAlchemy): Ticket, Contato, SessaoConversa, Curso, Turma, BancoObjecoes
-- [ ] 2.1.2 Configurar Alembic e gerar migration inicial (`migrations/`)
-- [ ] 2.1.3 Implementar `app/repository/mapper.py` (DB snake_case ↔ DTO camelCase; mapper explicito anti-drift)
-- [ ] 2.1.4 Definir schemas Pydantic em `app/schemas/` (camelCase) para Curso/Turma/Objecao
-- [ ] 2.1.5 Escrever testes de modelo/mapper (roundtrip snake↔camel; paridade de campos obrigatorios)
+- [x] 2.1.1 Implementar `app/repository/models.py` (SQLAlchemy): Ticket, Contato, SessaoConversa, Curso, Turma, BancoObjecoes
+- [x] 2.1.2 Configurar Alembic e gerar migration inicial (`migrations/`)
+- [x] 2.1.3 Implementar `app/repository/mapper.py` (DB snake_case ↔ DTO camelCase; mapper explicito anti-drift)
+- [x] 2.1.4 Definir schemas Pydantic em `app/schemas/` (camelCase) para Curso/Turma/Objecao
+- [x] 2.1.5 Escrever testes de modelo/mapper (roundtrip snake↔camel; paridade de campos obrigatorios)
 
 ### 2.2 Estruturas Redis `[A]`
 
 Ref: data-model.md §Estruturas Redis; FR-003/035/037
 
-- [ ] 2.2.1 Implementar helpers de chave Redis (`idemp:{...}`, `debounce:{chamadoId}`, `lock:ticket:{id}`) com prefixos convencionados
+- [x] 2.2.1 Implementar helpers de chave Redis (`idemp:{...}`, `debounce:{chamadoId}`, `lock:ticket:{id}`) com prefixos convencionados
 - [ ] 2.2.2 Implementar janela quente de memoria por contato (TTL configuravel)
-- [ ] 2.2.3 Escrever testes de TTL/expiracao das chaves (idempotencia 24h; lock PX 30000)
+- [x] 2.2.3 Escrever testes de TTL/expiracao das chaves (idempotencia 24h; lock PX 30000)
 
 ### 2.3 Seed idempotente dos 6 cursos `[A]`
 

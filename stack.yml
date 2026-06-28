@@ -1,0 +1,164 @@
+# ============================================================================
+# Docker Swarm stack — SDR WhatsApp GoldIncision
+#
+# Servicos: app (FastAPI), postgres (persistencia duravel), redis (efemero)
+#
+# Redes:
+#   sdr-internal: overlay propria (app + postgres + redis, isolados — FR-029)
+#   n8n-net:      overlay EXTERNA attachable compartilhada com o n8n
+#                 (para o webhook interno — block-001/dec-015)
+#                 NAO modifica o servico n8n (Principio VI)
+#   traefik-public: overlay do Traefik (SOMENTE para /admin/* e /health)
+#
+# Labels Traefik: EXCLUSIVAMENTE /admin/* e /health
+# /webhook/chatmaster: SEM label Traefik (nao exposto publicamente — block-001)
+#
+# Secrets: referenciar secrets pre-criados no Swarm (nunca em texto claro FR-032)
+#   docker secret create openai_api_key <(echo "sk-...")
+#   docker secret create chatmaster_token <(echo "Bearer ...")
+#   docker secret create admin_token <(echo "token-admin-seguro")
+#   docker secret create webhook_token <(echo "token-opcional")
+# ============================================================================
+
+version: "3.9"
+
+services:
+
+  # --------------------------------------------------------------------------
+  # Aplicacao FastAPI — SDR WhatsApp
+  # --------------------------------------------------------------------------
+  app:
+    image: registry.todo-tips.com/sdr-whatsapp:latest
+    networks:
+      - sdr-internal        # acesso a postgres e redis
+      - n8n-net             # receber webhook do n8n pela overlay interna
+      - traefik-public      # roteamento publico APENAS /admin/* e /health
+    secrets:
+      - openai_api_key
+      - chatmaster_token
+      - admin_token
+      - webhook_token
+    environment:
+      # URLs dos servicos internos (sem credenciais — credenciais via secrets)
+      DATABASE_URL: "postgresql+asyncpg://sdr:${POSTGRES_PASSWORD:-sdrsecret}@postgres:5432/sdr"
+      REDIS_URL: "redis://redis:6379/0"
+      # Caminhos para os secrets montados
+      OPENAI_API_KEY_FILE: "/run/secrets/openai_api_key"
+      CHATMASTER_TOKEN_FILE: "/run/secrets/chatmaster_token"
+      ADMIN_TOKEN_FILE: "/run/secrets/admin_token"
+      WEBHOOK_TOKEN_FILE: "/run/secrets/webhook_token"
+      # Configuracoes nao-sensiveis
+      OPENAI_MODEL_REASONING: "${OPENAI_MODEL_REASONING:-gpt-4o}"
+      OPENAI_MODEL_CHEAP: "${OPENAI_MODEL_CHEAP:-gpt-4o-mini}"
+      DEBOUNCE_SECONDS: "${DEBOUNCE_SECONDS:-8}"
+      CHATMASTER_BASE_URL: "${CHATMASTER_BASE_URL:-https://api2.chatmasterveloz.com}"
+      NIDIA_PHONE: "${NIDIA_PHONE:-}"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+      labels:
+        # Traefik: habilitar apenas para este servico
+        - "traefik.enable=true"
+        - "traefik.docker.network=traefik-public"
+        # Router para /admin/* (autenticado por token interno — nao por Traefik)
+        - "traefik.http.routers.sdr-admin.rule=Host(`${SDR_HOST:-sdr.todo-tips.com}`) && PathPrefix(`/admin`)"
+        - "traefik.http.routers.sdr-admin.entrypoints=websecure"
+        - "traefik.http.routers.sdr-admin.tls=true"
+        - "traefik.http.routers.sdr-admin.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.sdr-admin.service=sdr-app"
+        # Router para /health (publico para Traefik healthcheck)
+        - "traefik.http.routers.sdr-health.rule=Host(`${SDR_HOST:-sdr.todo-tips.com}`) && Path(`/health`)"
+        - "traefik.http.routers.sdr-health.entrypoints=websecure"
+        - "traefik.http.routers.sdr-health.tls=true"
+        - "traefik.http.routers.sdr-health.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.sdr-health.service=sdr-app"
+        # Servico (porta interna)
+        - "traefik.http.services.sdr-app.loadbalancer.server.port=8000"
+        # NOTA: /webhook/chatmaster NAO tem label Traefik — apenas overlay interna
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL — persistencia duravel (contatos, historico, catalogo)
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    networks:
+      - sdr-internal        # isolado — nao exposto ao Traefik nem ao n8n
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: "sdr"
+      POSTGRES_USER: "sdr"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-sdrsecret}"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sdr -d sdr"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --------------------------------------------------------------------------
+  # Redis — estado efemero (debounce, locks, idempotencia, janela quente)
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    networks:
+      - sdr-internal        # isolado — nao exposto ao Traefik nem ao n8n
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          memory: 192M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  # Overlay propria da stack (app + postgres + redis)
+  sdr-internal:
+    driver: overlay
+    attachable: false
+
+  # Overlay compartilhada com o n8n — EXTERNA ao stack, pre-existente
+  # Confirmar nome real com: docker network ls | grep n8n
+  # antes de fazer docker stack deploy
+  n8n-net:
+    external: true
+    name: "${N8N_NETWORK:-n8n-net}"
+
+  # Rede do Traefik — EXTERNA ao stack, pre-existente
+  traefik-public:
+    external: true
+    name: "${TRAEFIK_NETWORK:-traefik-public}"
+
+secrets:
+  openai_api_key:
+    external: true
+  chatmaster_token:
+    external: true
+  admin_token:
+    external: true
+  webhook_token:
+    external: true

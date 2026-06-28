@@ -41,7 +41,9 @@ class Settings(BaseSettings):
 
     # --- ChatMaster ---
     chatmaster_token: str = ""
-    chatmaster_base_url: str = "https://api2.chatmasterveloz.com"
+    # Base da conta/webhook deste deploy. Existe tambem api2.chatmasterveloz.com
+    # (outra instancia); usar a errada causa 400 "Cannot read properties of null".
+    chatmaster_base_url: str = "https://api.chatmasterveloz.com"
     # Handoff humano via API "Atualizar Ticket" (POST {base}/api/tickets/updateAPI):
     # preenche queueId com o id da fila de atendimento humano, userId=null e
     # status="pending". O id da fila e ESPECIFICO do deploy (operador define no

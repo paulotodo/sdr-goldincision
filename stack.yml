@@ -60,7 +60,7 @@ services:
       OPENAI_MODEL_REASONING: "${OPENAI_MODEL_REASONING:-gpt-4o}"
       OPENAI_MODEL_CHEAP: "${OPENAI_MODEL_CHEAP:-gpt-4o-mini}"
       DEBOUNCE_SECONDS: "${DEBOUNCE_SECONDS:-8}"
-      CHATMASTER_BASE_URL: "${CHATMASTER_BASE_URL:-https://api2.chatmasterveloz.com}"
+      CHATMASTER_BASE_URL: "${CHATMASTER_BASE_URL:-https://api.chatmasterveloz.com}"
       NIDIA_PHONE: "${NIDIA_PHONE:-}"
       # Handoff humano (API Atualizar Ticket): queueId da fila humana.
       HANDOFF_QUEUE_ID_DEFAULT: "${HANDOFF_QUEUE_ID_DEFAULT:-}"

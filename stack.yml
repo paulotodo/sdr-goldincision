@@ -79,15 +79,15 @@ services:
         - "traefik.docker.network=network_main"
         # Router para /admin/* (autenticado por token interno — nao por Traefik)
         - "traefik.http.routers.sdr-admin.rule=Host(`${SDR_HOST:-sdr.todo-tips.com}`) && PathPrefix(`/admin`)"
-        - "traefik.http.routers.sdr-admin.entrypoints=websecure"
+        - "traefik.http.routers.sdr-admin.entrypoints=web,websecure"
         - "traefik.http.routers.sdr-admin.tls=true"
-        - "traefik.http.routers.sdr-admin.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.sdr-admin.tls.certresolver=letsencryptresolver"
         - "traefik.http.routers.sdr-admin.service=sdr-app"
         # Router para /health (publico para Traefik healthcheck)
         - "traefik.http.routers.sdr-health.rule=Host(`${SDR_HOST:-sdr.todo-tips.com}`) && Path(`/health`)"
-        - "traefik.http.routers.sdr-health.entrypoints=websecure"
+        - "traefik.http.routers.sdr-health.entrypoints=web,websecure"
         - "traefik.http.routers.sdr-health.tls=true"
-        - "traefik.http.routers.sdr-health.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.sdr-health.tls.certresolver=letsencryptresolver"
         - "traefik.http.routers.sdr-health.service=sdr-app"
         # Servico (porta interna)
         - "traefik.http.services.sdr-app.loadbalancer.server.port=8000"

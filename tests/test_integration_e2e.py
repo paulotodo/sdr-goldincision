@@ -163,7 +163,7 @@ def _make_flow_engine(
     intencao_valor deve ser um valor de ClassificacaoIntencao valido.
     """
     from app.core.flow import FlowEngine
-    from app.core.intent import ClassificacaoIntencao, Idioma, INTENCAO_PARA_CAMINHO
+    from app.core.intent import INTENCAO_PARA_CAMINHO, ClassificacaoIntencao, Idioma
 
     db_mock = AsyncMock()
 
@@ -1098,7 +1098,7 @@ class TestF8WebhookEngineWired:
         FlowEngine.process() foi de fato chamado.
         """
         from app.api.webhook import _handle_engine
-        from app.core.flow import FlowEngine, FlowResult
+        from app.core.flow import FlowResult
 
         # Montar FlowResult que o FlowEngine.process() retornaria
         fake_result = FlowResult(
@@ -1111,8 +1111,6 @@ class TestF8WebhookEngineWired:
 
         # Rastrear se FlowEngine.process foi chamado
         process_was_called = []
-
-        original_process = FlowEngine.process
 
         async def spy_process(self_engine, ticket_id, user_message, context):
             process_was_called.append({"ticket_id": ticket_id, "message": user_message})
@@ -1192,7 +1190,6 @@ class TestF8WebhookEngineWired:
         silenciosamente (nao lanca excecao, nao invoca engine).
         """
         from app.api.webhook import _handle_engine
-        from app.core.flow import FlowEngine
 
         process_was_called = []
 
@@ -1233,8 +1230,6 @@ class TestF8WebhookEngineWired:
         from app.api import webhook as webhook_module
 
         process_calls = []
-
-        original_process = webhook_module._process_consolidated_messages
 
         async def spy_process(chamado_id, messages):
             process_calls.append({"chamado_id": chamado_id, "n_msgs": len(messages)})

@@ -3,15 +3,18 @@
 #
 # Servicos: app (FastAPI), postgres (persistencia duravel), redis (efemero)
 #
-# Redes:
-#   sdr-internal: overlay propria (app + postgres + redis, isolados — FR-029)
-#   n8n-net:      overlay EXTERNA attachable compartilhada com o n8n
-#                 (para o webhook interno — block-001/dec-015)
-#                 NAO modifica o servico n8n (Principio VI)
-#   traefik-public: overlay do Traefik (SOMENTE para /admin/* e /health)
+# Redes (modelo 2-redes confirmado em 1.3.2):
+#   sdr-internal: overlay PRIVADA criada por esta stack (app + postgres + redis)
+#                 Postgres e Redis NUNCA expostos a servicos externos
+#   network_main: overlay EXTERNA pre-existente no swarm (external: true)
+#                 Contém: n8n (n8n_n8n_editor/webhook/worker) + Traefik (traefik_traefik)
+#                 Por esta rede: n8n alcanca /webhook/chatmaster internamente via
+#                 DNS do servico (http://app:8000/webhook/chatmaster) SEM rota publica
+#                 Traefik roteia SOMENTE /admin/* e /health nesta rede
+#                 Principio VI: NUNCA modificar servicos n8n/traefik — so referenciar
 #
-# Labels Traefik: EXCLUSIVAMENTE /admin/* e /health
-# /webhook/chatmaster: SEM label Traefik (nao exposto publicamente — block-001)
+# Labels Traefik: EXCLUSIVAMENTE /admin/* e /health (via network_main)
+# /webhook/chatmaster: SEM label Traefik (so alcancavel pela overlay interna — block-001)
 #
 # Secrets: referenciar secrets pre-criados no Swarm (nunca em texto claro FR-032)
 #   docker secret create openai_api_key <(echo "sk-...")
@@ -30,9 +33,8 @@ services:
   app:
     image: registry.todo-tips.com/sdr-whatsapp:latest
     networks:
-      - sdr-internal        # acesso a postgres e redis
-      - n8n-net             # receber webhook do n8n pela overlay interna
-      - traefik-public      # roteamento publico APENAS /admin/* e /health
+      - sdr-internal        # acesso a postgres e redis (overlay privada)
+      - network_main        # receber webhook do n8n + roteamento Traefik /admin+/health
     secrets:
       - openai_api_key
       - chatmaster_token
@@ -67,7 +69,7 @@ services:
       labels:
         # Traefik: habilitar apenas para este servico
         - "traefik.enable=true"
-        - "traefik.docker.network=traefik-public"
+        - "traefik.docker.network=network_main"
         # Router para /admin/* (autenticado por token interno — nao por Traefik)
         - "traefik.http.routers.sdr-admin.rule=Host(`${SDR_HOST:-sdr.todo-tips.com}`) && PathPrefix(`/admin`)"
         - "traefik.http.routers.sdr-admin.entrypoints=websecure"
@@ -141,17 +143,13 @@ networks:
     driver: overlay
     attachable: false
 
-  # Overlay compartilhada com o n8n — EXTERNA ao stack, pre-existente
-  # Confirmar nome real com: docker network ls | grep n8n
-  # antes de fazer docker stack deploy
-  n8n-net:
+  # Overlay compartilhada confirmada em 1.3.2 (inspecao do no manager):
+  #   docker network inspect network_main
+  #   Encontrado: n8n_n8n_editor, n8n_n8n_webhook, n8n_n8n_worker, traefik_traefik
+  # NAO criar, NAO modificar — apenas referenciar (Principio VI)
+  network_main:
     external: true
-    name: "${N8N_NETWORK:-n8n-net}"
-
-  # Rede do Traefik — EXTERNA ao stack, pre-existente
-  traefik-public:
-    external: true
-    name: "${TRAEFIK_NETWORK:-traefik-public}"
+    name: "network_main"
 
 secrets:
   openai_api_key:

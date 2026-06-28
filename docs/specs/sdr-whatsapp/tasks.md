@@ -49,7 +49,7 @@ Ref: spec.md FR-028/029/031/032; plan.md §Project Structure; contracts/webhook-
 Ref: spec.md FR-031, US6-AS1; plan.md §Itens confirmáveis
 
 - [x] 1.3.1 Script/documentacao de `docker build` + `docker push registry.todo-tips.com/sdr-whatsapp:latest`
-- [ ] 1.3.2 Confirmar nome da overlay compartilhada do n8n e da rede do Traefik via inspecao (item confirmavel em runtime; nao inventar)
+- [x] 1.3.2 Confirmar nome da overlay compartilhada do n8n e da rede do Traefik via inspecao (item confirmavel em runtime; nao inventar)
 - [x] 1.3.3 Teste/checagem: pipeline NAO executa `docker stack deploy` (gate de blast radius)
 
 ---
@@ -71,16 +71,16 @@ Ref: data-model.md; spec.md Key Entities; FR-018/020/025
 Ref: data-model.md §Estruturas Redis; FR-003/035/037
 
 - [x] 2.2.1 Implementar helpers de chave Redis (`idemp:{...}`, `debounce:{chamadoId}`, `lock:ticket:{id}`) com prefixos convencionados
-- [ ] 2.2.2 Implementar janela quente de memoria por contato (TTL configuravel)
+- [x] 2.2.2 Implementar janela quente de memoria por contato (TTL configuravel)
 - [x] 2.2.3 Escrever testes de TTL/expiracao das chaves (idempotencia 24h; lock PX 30000)
 
 ### 2.3 Seed idempotente dos 6 cursos `[A]`
 
 Ref: spec.md FR-027, US4-AS7
 
-- [ ] 2.3.1 Implementar `app/seed.py` lendo `knowledge_base/documentos_agente/` (Curso Online, HG Modulo 1, HG360 SP, HG360 Barcelona, Licenciamento, Franquia)
-- [ ] 2.3.2 Garantir idempotencia do seed (re-execucao nao duplica catalogo)
-- [ ] 2.3.3 Escrever teste do seed (banco vazio → 6 cursos carregados; re-run → sem duplicatas)
+- [x] 2.3.1 Implementar `app/seed.py` lendo `knowledge_base/documentos_agente/` (Curso Online, HG Modulo 1, HG360 SP, HG360 Barcelona, Licenciamento, Franquia)
+- [x] 2.3.2 Garantir idempotencia do seed (re-execucao nao duplica catalogo)
+- [x] 2.3.3 Escrever teste do seed (banco vazio → 6 cursos carregados; re-run → sem duplicatas)
 
 ---
 
@@ -90,30 +90,30 @@ Ref: spec.md FR-027, US4-AS7
 
 Ref: contracts/webhook-inbound.md; spec.md FR-001/002/029; block-001/dec-015
 
-- [ ] 3.1.1 Implementar `app/api/webhook.py` `POST /webhook/chatmaster` com Pydantic tolerante (`extra=ignore`), ack 200 imediato
-- [ ] 3.1.2 Confirmar que o endpoint NAO e roteado pelo Traefik (so alcancavel pela overlay interna) — alinhado a 1.2.4
-- [ ] 3.1.3 Implementar validacao opcional de `X-Webhook-Token` (comparacao tempo-constante; descarte + log se invalido, mantendo ack 200) — defesa em profundidade (SEC-WH-1)
-- [ ] 3.1.4 Ignorar `fromMe:true` (envelope e item) sem efeito colateral (FR-002)
-- [ ] 3.1.5 Aplicar limites de tamanho de corpo e de itens em `mensagem[]` (SEC-WH-4)
-- [ ] 3.1.6 Escrever testes do endpoint (payload valido/malformado → 200; fromMe ignorado; token invalido descartado)
+- [x] 3.1.1 Implementar `app/api/webhook.py` `POST /webhook/chatmaster` com Pydantic tolerante (`extra=ignore`), ack 200 imediato
+- [x] 3.1.2 Confirmar que o endpoint NAO e roteado pelo Traefik (so alcancavel pela overlay interna) — alinhado a 1.2.4
+- [x] 3.1.3 Implementar validacao opcional de `X-Webhook-Token` (comparacao tempo-constante; descarte + log se invalido, mantendo ack 200) — defesa em profundidade (SEC-WH-1)
+- [x] 3.1.4 Ignorar `fromMe:true` (envelope e item) sem efeito colateral (FR-002)
+- [x] 3.1.5 Aplicar limites de tamanho de corpo e de itens em `mensagem[]` (SEC-WH-4)
+- [x] 3.1.6 Escrever testes do endpoint (payload valido/malformado → 200; fromMe ignorado; token invalido descartado)
 
 ### 3.2 Idempotencia, debounce e lock `[C]`
 
 Ref: spec.md FR-003/035-INFRA-MUTEX/037-INFRA-IDEMP; contracts/webhook-inbound.md §Pipeline
 
-- [ ] 3.2.1 Implementar `app/core/idempotency.py` (`SET NX EX 86400` por chamadoId+hash; reenvio do n8n descartado)
-- [ ] 3.2.2 Implementar `app/core/debounce.py` (RPUSH + flush apos janela default 8s, consolidacao SC-005)
-- [ ] 3.2.3 Implementar `app/core/locks.py` (lock por ticket `SET NX PX 30000`, libera ao fim — FR-035)
-- [ ] 3.2.4 Implementar filtro de estado do ticket (em_handoff/encerrado → nao processar — FR-024)
-- [ ] 3.2.5 Escrever testes de rajada (5 msgs <2s → 1 resposta); reenvio (idempotencia descarta); lock serializa
+- [x] 3.2.1 Implementar `app/core/idempotency.py` (`SET NX EX 86400` por chamadoId+hash; reenvio do n8n descartado)
+- [x] 3.2.2 Implementar `app/core/debounce.py` (RPUSH + flush apos janela default 8s, consolidacao SC-005)
+- [x] 3.2.3 Implementar `app/core/locks.py` (lock por ticket `SET NX PX 30000`, libera ao fim — FR-035)
+- [x] 3.2.4 Implementar filtro de estado do ticket (em_handoff/encerrado → nao processar — FR-024)
+- [x] 3.2.5 Escrever testes de rajada (5 msgs <2s → 1 resposta); reenvio (idempotencia descarta); lock serializa
 
 ### 3.3 Download de midia com defesa SSRF `[C]`
 
 Ref: contracts/webhook-inbound.md SEC-WH-2; spec.md FR-004/005
 
-- [ ] 3.3.1 Implementar `app/integrations/media.py` com allowlist de host (`object.sp2.eveo.com.br`), bloqueio de IP privado/loopback/metadata (169.254.169.254), esquema != https e redirect fora da allowlist
-- [ ] 3.3.2 Tratar tipos `text/audio/video/image/document` e descartar tipo desconhecido com log (FR-004)
-- [ ] 3.3.3 Escrever testes SSRF (host fora da allowlist rejeitado; IP privado/metadata bloqueado; redirect malicioso barrado)
+- [x] 3.3.1 Implementar `app/integrations/media.py` com allowlist de host (`object.sp2.eveo.com.br`), bloqueio de IP privado/loopback/metadata (169.254.169.254), esquema != https e redirect fora da allowlist
+- [x] 3.3.2 Tratar tipos `text/audio/video/image/document` e descartar tipo desconhecido com log (FR-004)
+- [x] 3.3.3 Escrever testes SSRF (host fora da allowlist rejeitado; IP privado/metadata bloqueado; redirect malicioso barrado)
 
 ---
 

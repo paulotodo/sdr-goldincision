@@ -45,6 +45,7 @@ COPY app/ ./app/
 COPY migrations/ ./migrations/
 COPY knowledge_base/ ./knowledge_base/
 COPY pyproject.toml ./
+COPY alembic.ini ./
 
 # Ajustar permissoes
 RUN chown -R appuser:appuser /app

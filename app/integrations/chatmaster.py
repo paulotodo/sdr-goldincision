@@ -2,10 +2,12 @@
 Integracao com a API do ChatMaster.
 
 Outbound (FR-016/017):
-- POST https://api2.chatmasterveloz.com/api/messages/sendOfficialData
-  Body: {"number": "...", "text": "..."}
+- POST https://api2.chatmasterveloz.com/api/messages/send  (canal nao-oficial)
+  Body: {"number": "...", "body": "...", "openTicket": "0", "queueId": "0"}
   Auth: Bearer CHATMASTER_TOKEN (via secret)
 - Mensagens longas quebradas em blocos; 1 pergunta por envio.
+- Obs: sendOfficialData (API Meta) falha p/ canais whatsmeow/Pro
+  ("Cannot read properties of null"); por isso usamos /api/messages/send.
 
 Handoff de tickets (FR-022/023/024) — CONTRATO REAL (API "Atualizar Ticket"):
 - POST https://api2.chatmasterveloz.com/api/tickets/updateAPI
@@ -169,8 +171,16 @@ class ChatMasterClient:
         Para mensagens longas, use send_message_blocks.
         """
         client = self._ensure_client()
-        url = f"{self._base_url}/api/messages/sendOfficialData"
-        payload = {"number": number, "text": text}
+        # Endpoint NAO-oficial (/api/messages/send) — casa com canais whatsmeow/Pro
+        # (a conversa ja chega aberta, entao openTicket="0", queueId="0").
+        # Campo de texto e "body" (nao "text"). sendOfficialData e so p/ canal Meta.
+        url = f"{self._base_url}/api/messages/send"
+        payload = {
+            "number": number,
+            "body": text,
+            "openTicket": "0",
+            "queueId": "0",
+        }
 
         logger.debug(
             "chatmaster: send_message number=%s len=%d",

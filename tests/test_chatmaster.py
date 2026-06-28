@@ -107,8 +107,13 @@ async def test_send_message_sucesso():
 
     mock_http.post.assert_awaited_once()
     call_args = mock_http.post.call_args
-    assert "sendOfficialData" in call_args[0][0]
-    assert call_args[1]["json"] == {"number": "5511967296849", "text": "Ola!"}
+    assert call_args[0][0].endswith("/api/messages/send")
+    assert call_args[1]["json"] == {
+        "number": "5511967296849",
+        "body": "Ola!",
+        "openTicket": "0",
+        "queueId": "0",
+    }
 
 
 @pytest.mark.asyncio
@@ -133,7 +138,7 @@ async def test_send_message_blocks_chama_multiplos_posts():
     calls = []
 
     async def fake_post(url, **kwargs):
-        calls.append(kwargs["json"]["text"])
+        calls.append(kwargs["json"]["body"])
         return _mock_response(200)
 
     mock_http = AsyncMock()
@@ -157,7 +162,7 @@ async def test_send_message_blocks_texto_curto_envia_um_post():
     calls = []
 
     async def fake_post(url, **kwargs):
-        calls.append(kwargs["json"]["text"])
+        calls.append(kwargs["json"]["body"])
         return _mock_response(200)
 
     mock_http = AsyncMock()

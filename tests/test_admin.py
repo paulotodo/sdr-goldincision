@@ -11,15 +11,13 @@ Cobre:
 """
 from __future__ import annotations
 
-import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.api import admin as admin_module
-
+from app.main import app
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -165,7 +163,7 @@ def test_token_constante_tempo_nao_vaza_info(client, monkeypatch):
     with patch("app.api.admin.hmac.compare_digest", side_effect=spy_compare):
         client.get(
             "/admin/cursos",
-            headers={"Authorization": f"Bearer token-qualquer"},
+            headers={"Authorization": "Bearer token-qualquer"},
         )
 
     assert len(call_count) == 1, "hmac.compare_digest deve ser chamado exatamente 1x"
@@ -226,7 +224,6 @@ def test_criar_curso_retorna_201(client, monkeypatch, mock_factory, mock_db_sess
     curso_mock = _make_mock_curso(curso_id=99)
 
     # Mock de verificacao de slug duplicado (sem duplicado)
-    from sqlalchemy.engine import Result
     result_vazio = MagicMock()
     result_vazio.scalar_one_or_none = MagicMock(return_value=None)
 

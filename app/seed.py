@@ -27,7 +27,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 

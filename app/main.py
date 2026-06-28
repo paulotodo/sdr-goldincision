@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from app.config import settings
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+    pass
 
 logger = logging.getLogger(__name__)
 

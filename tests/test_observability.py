@@ -13,22 +13,19 @@ Cobre:
 from __future__ import annotations
 
 import json
-import pytest
-from io import StringIO
 from unittest.mock import patch
 
 from app.observability.log import (
-    log_event,
+    _mask_number,
+    _scrub,
     log_erro,
+    log_event,
     log_handoff,
     log_llm_call,
     log_message_out,
     log_webhook_in,
     timed_llm_call,
-    _mask_number,
-    _scrub,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -246,7 +243,6 @@ def test_log_erro_nao_inclui_secrets_no_detalhe():
 
 def test_timed_llm_call_emite_evento_com_latencia():
     """timed_llm_call mede latencia e emite log_llm_call."""
-    events = []
     with patch("app.observability.log.log_llm_call") as mock_log:
         with timed_llm_call(ticket_id=1, stage="fluxo", model_used="gpt-4o-mini") as ctx:
             ctx["tokens_in"] = 100

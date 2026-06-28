@@ -12,13 +12,10 @@ Abordagem: mocks de Redis em memoria (sem Redis real).
 from __future__ import annotations
 
 import asyncio
-import json
 from collections import defaultdict
 from typing import Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Redis in-memory mock para testes

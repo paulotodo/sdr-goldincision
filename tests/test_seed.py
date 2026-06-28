@@ -9,12 +9,12 @@ Cenarios:
 """
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.seed import run_seed, CURSOS_SEED
-
+from app.seed import CURSOS_SEED, run_seed
 
 # ---------------------------------------------------------------------------
 # Testes unitarios (sem DB real — verifica logica e chamadas)

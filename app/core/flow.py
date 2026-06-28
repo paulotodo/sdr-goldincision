@@ -15,21 +15,20 @@ from __future__ import annotations
 
 import logging
 from enum import IntEnum
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.intent import ClassificacaoIntencao, IntentClassifier, INTENCAO_PARA_CAMINHO
+from app.core.intent import INTENCAO_PARA_CAMINHO, ClassificacaoIntencao, IntentClassifier
 from app.core.memory import MemoryManager, SessionContext
 from app.core.responder import GroundedResponder
 from app.repository.models import (
     Curso,
     CursoApresentacao,
+    CursoLink,
     CursoObjecao,
     CursoTurma,
-    CursoLink,
-    Ticket,
 )
 
 logger = logging.getLogger(__name__)

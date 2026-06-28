@@ -5,7 +5,17 @@ Design: extra=ignore em todos os modelos — novos campos do ChatMaster
 nao quebram o parser. Apenas campos usados pelo motor conversacional sao
 declarados; o restante e silenciosamente ignorado.
 
-Fonte: knowledge_base/example_webhook_json/json_message,json
+Fontes:
+- knowledge_base/example_webhook_json/json_message,json  (mensagem: list)
+- knowledge_base/example_webhook_json/json_audio,json    (mensagem: dict)
+- knowledge_base/example_webhook_json/json_video,json    (mensagem: dict)
+- knowledge_base/example_webhook_json/json_document,json (mensagem: dict)
+
+Nota de contrato (anti-drift 8.1.2):
+  Payloads de texto tem `mensagem` como List[dict].
+  Payloads de midia (audio/video/document) tem `mensagem` como dict
+  com campos {mediaType, mediaUrl, fromMe, body, ...}.
+  O pre-validator `_normalise_mensagem` normaliza o dict → [MensagemItem].
 """
 from __future__ import annotations
 
@@ -120,6 +130,38 @@ class WebhookPayload(BaseModel):
 
     # Dados completos do ticket
     ticketData: Optional[TicketData] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise_mensagem(cls, values: Any) -> Any:
+        """
+        Normaliza o campo `mensagem` para sempre ser uma lista.
+
+        Payloads de texto: mensagem = [{type, text}, ...]  → sem mudanca.
+        Payloads de midia (audio/video/document): mensagem = {mediaType, mediaUrl, ...}
+          → converte para [{type: mediaType, mediaUrl: mediaUrl, ...}].
+
+        Anti-drift guard (task 8.1.2): todos os 4 exemplos reais de
+        knowledge_base/example_webhook_json/ devem ser parseados sem erro.
+        """
+        if not isinstance(values, dict):
+            return values
+        raw_msg = values.get("mensagem")
+        if isinstance(raw_msg, dict):
+            # Payload de midia: mensagem e um objeto unico
+            media_type = raw_msg.get("mediaType") or "unknown"
+            normalised: dict[str, Any] = {
+                "type": media_type,
+                "url": raw_msg.get("mediaUrl") or raw_msg.get("remoteUrl"),
+                "mediaUrl": raw_msg.get("mediaUrl") or raw_msg.get("remoteUrl"),
+                "filename": raw_msg.get("filename"),
+                "mimetype": raw_msg.get("mimetype"),
+                # Texto de transcricao ou caption pode estar em "body"
+                "text": raw_msg.get("body") or raw_msg.get("text"),
+            }
+            values = dict(values)
+            values["mensagem"] = [normalised]
+        return values
 
     @model_validator(mode="after")
     def validate_mensagem_size(self) -> "WebhookPayload":

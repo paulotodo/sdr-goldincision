@@ -17,7 +17,6 @@ from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy import select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.hot_window import HotWindowManager
@@ -363,7 +362,8 @@ class MemoryManager:
 
     async def _count_messages(self, sessao_id: int) -> int:
         """Conta total de mensagens de uma sessao."""
-        from sqlalchemy import func, select as sa_select
+        from sqlalchemy import func
+        from sqlalchemy import select as sa_select
 
         stmt = sa_select(func.count()).select_from(Mensagem).where(
             Mensagem.sessao_id == sessao_id

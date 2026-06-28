@@ -36,7 +36,6 @@ from app.repository.models import (
 )
 from app.schemas.curso import (
     CursoCreate,
-    CursoRead,
     CursoUpdate,
 )
 

@@ -222,18 +222,18 @@ Ref: spec.md FR-033/034; US7
 
 Ref: quickstart.md (14 cenarios); plan.md §Testing; research.md Decisao 12
 
-- [ ] 8.1.1 Configurar pytest + pytest-asyncio com Postgres/Redis efemeros (testcontainers/CI) e OpenAI/ChatMaster mockados
-- [ ] 8.1.2 Roundtrip real dos exemplos `knowledge_base/example_webhook_json/` (nenhum campo obrigatorio perdido — guarda anti-drift)
-- [ ] 8.1.3 Cobrir os 14 cenarios do quickstart.md como testes de integracao
-- [ ] 8.1.4 Teste de rate limiting/teto de gasto LLM (SEC-WH-3)
+- [x] 8.1.1 Configurar pytest + pytest-asyncio com Postgres/Redis efemeros (testcontainers/CI) e OpenAI/ChatMaster mockados
+- [x] 8.1.2 Roundtrip real dos exemplos `knowledge_base/example_webhook_json/` (nenhum campo obrigatorio perdido — guarda anti-drift)
+- [x] 8.1.3 Cobrir os 14 cenarios do quickstart.md como testes de integracao
+- [x] 8.1.4 Teste de rate limiting/teto de gasto LLM (SEC-WH-3)
 
 ### 8.2 Lint e gates de qualidade `[M]`
 
 Ref: plan.md §Constitution Check
 
-- [ ] 8.2.1 Configurar lint/format (ruff/black) e checagem de tipos
-- [ ] 8.2.2 Garantir suite verde + lint limpo antes do build final
-- [ ] 8.2.3 Checagem anti-secret no repo (nenhum secret commitado — FR-032)
+- [x] 8.2.1 Configurar lint/format (ruff/black) e checagem de tipos
+- [x] 8.2.2 Garantir suite verde + lint limpo antes do build final
+- [x] 8.2.3 Checagem anti-secret no repo (nenhum secret commitado — FR-032)
 
 ---
 

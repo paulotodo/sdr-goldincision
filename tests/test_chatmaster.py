@@ -11,17 +11,16 @@ Cobre:
 """
 from __future__ import annotations
 
-import pytest
-import httpx
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+import pytest
+
 from app.integrations.chatmaster import (
-    ChatMasterClient,
     HANDOFF_QUEUE_ALLOWLIST,
+    ChatMasterClient,
     _split_into_blocks,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

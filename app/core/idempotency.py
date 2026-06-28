@@ -18,7 +18,7 @@ import json
 import logging
 from typing import Any
 
-from app.core.redis_keys import idemp_key, IDEMP_TTL_SECONDS
+from app.core.redis_keys import IDEMP_TTL_SECONDS, idemp_key
 
 logger = logging.getLogger(__name__)
 

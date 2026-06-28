@@ -11,21 +11,18 @@ Cenarios:
 from __future__ import annotations
 
 import json
-import asyncio
-from typing import Optional
 
 import pytest
 
 from app.core.intent import (
-    IntentClassifier,
+    INTENCAO_PARA_CAMINHO,
     ClassificacaoIntencao,
     Idioma,
-    INTENCAO_PARA_CAMINHO,
-    _parse_intencao,
-    _parse_idioma,
+    IntentClassifier,
     _parse_classify_response,
+    _parse_idioma,
+    _parse_intencao,
 )
-
 
 # ---------------------------------------------------------------------------
 # Mock do OpenAI client

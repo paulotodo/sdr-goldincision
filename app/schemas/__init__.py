@@ -5,13 +5,13 @@ Convencao camelCase para todos os campos expostos via API.
 Validacao estrita (sem campos extras — anti mass-assignment SEC-ADM-4).
 """
 from app.schemas.curso import (
-    CursoCreate,
-    CursoRead,
-    CursoUpdate,
     CursoApresentacaoRead,
-    CursoObjecaoRead,
-    CursoTurmaRead,
+    CursoCreate,
     CursoLinkRead,
+    CursoObjecaoRead,
+    CursoRead,
+    CursoTurmaRead,
+    CursoUpdate,
 )
 
 __all__ = [

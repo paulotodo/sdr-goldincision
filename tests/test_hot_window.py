@@ -10,15 +10,12 @@ Cenarios:
 """
 from __future__ import annotations
 
-import asyncio
-import json
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 
-from app.core.hot_window import HotWindowManager, HOT_WINDOW_MAX_MSGS
-
+from app.core.hot_window import HOT_WINDOW_MAX_MSGS, HotWindowManager
 
 # ---------------------------------------------------------------------------
 # Redis em memoria (reutiliza FakeRedis de test_idempotency_debounce_lock)

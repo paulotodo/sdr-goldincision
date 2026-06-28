@@ -11,16 +11,14 @@ Cenarios cobertos:
 """
 from __future__ import annotations
 
-import ipaddress
-import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.integrations.media import (
+    SUPPORTED_MEDIA_TYPES,
     MediaDownloader,
     SSRFError,
-    SUPPORTED_MEDIA_TYPES,
     _is_ip_blocked,
     _validate_url,
 )

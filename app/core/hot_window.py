@@ -20,7 +20,7 @@ import json
 import logging
 from typing import Any
 
-from app.core.redis_keys import hot_window_key, HOT_WINDOW_TTL_SECONDS
+from app.core.redis_keys import HOT_WINDOW_TTL_SECONDS, hot_window_key
 
 logger = logging.getLogger(__name__)
 

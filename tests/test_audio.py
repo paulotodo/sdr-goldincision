@@ -8,15 +8,11 @@ Cenarios:
 """
 from __future__ import annotations
 
-import asyncio
 import sys
 from types import ModuleType
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
-import io
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Stub do modulo openai para testes sem a dependencia real

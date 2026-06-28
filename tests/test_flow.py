@@ -15,29 +15,23 @@ Cenarios:
 """
 from __future__ import annotations
 
-import asyncio
-import json
 from typing import Optional
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.core.flow import (
-    FlowEngine,
-    CaminhoMapaMestre,
-    FlowResult,
-    ETAPA_QUALIF_MEDICO,
-    ETAPA_QUALIF_EXPERIENCIA,
+    ETAPA_HANDOFF,
     ETAPA_MENU,
     ETAPA_PACIENTE,
-    ETAPA_HANDOFF,
+    ETAPA_QUALIF_EXPERIENCIA,
+    ETAPA_QUALIF_MEDICO,
+    CaminhoMapaMestre,
+    FlowResult,
     _detectar_confirmacao,
     _detectar_experiencia_corporal,
 )
-from app.core.intent import ClassificacaoIntencao, Idioma, IntentClassifier
-from app.core.memory import MemoryManager, SessionContext
-from app.core.responder import GroundedResponder
-
+from app.core.intent import ClassificacaoIntencao, Idioma
+from app.core.memory import SessionContext
 
 # ---------------------------------------------------------------------------
 # Fixtures e mocks
@@ -386,7 +380,7 @@ async def test_mudanca_de_assunto_redireciona():
     )
     ctx = make_context(caminho=1, etapa="apresentacao", eh_medico=True)
 
-    result = await engine.process(1, "na verdade quero saber sobre licenciamento", ctx)
+    _ = await engine.process(1, "na verdade quero saber sobre licenciamento", ctx)
 
     # Deve ter mudado para caminho 6
     assert ctx.caminho == CaminhoMapaMestre.LICENCIAMENTO_FRANQUIA

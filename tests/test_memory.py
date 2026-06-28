@@ -11,17 +11,13 @@ Cenarios:
 """
 from __future__ import annotations
 
-import asyncio
 from collections import defaultdict
-from typing import Any, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
-import json
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
-from app.core.memory import MemoryManager, SessionContext, _SUMMARIZE_THRESHOLD
-from app.core.hot_window import HotWindowManager
-
+from app.core.memory import _SUMMARIZE_THRESHOLD, MemoryManager, SessionContext
 
 # ---------------------------------------------------------------------------
 # Fakes

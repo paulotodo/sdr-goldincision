@@ -13,14 +13,11 @@ Cenarios cobertos:
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
-from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-
 
 # ---------------------------------------------------------------------------
 # Payload real do webhook (baseado em example_webhook_json/json_message,json)

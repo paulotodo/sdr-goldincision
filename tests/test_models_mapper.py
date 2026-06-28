@@ -11,9 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.schemas.curso import CursoCreate, CursoRead, CursoUpdate
-from app.repository.mapper import dto_to_curso_dict, curso_model_to_dto
-
+from app.repository.mapper import dto_to_curso_dict
+from app.schemas.curso import CursoCreate, CursoUpdate
 
 # ---------------------------------------------------------------------------
 # Testes de schema CursoCreate

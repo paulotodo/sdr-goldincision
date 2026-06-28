@@ -6,19 +6,16 @@ Testa a corretude dos prefixos e parametros de TTL
 """
 from __future__ import annotations
 
-import pytest
-
+from app.core.idempotency import compute_payload_hash
 from app.core.redis_keys import (
     IDEMP_TTL_SECONDS,
     LOCK_TTL_MS,
-    HOT_WINDOW_TTL_SECONDS,
-    idemp_key,
     debounce_key,
-    lock_key,
-    hot_window_key,
     estado_key,
+    hot_window_key,
+    idemp_key,
+    lock_key,
 )
-from app.core.idempotency import compute_payload_hash
 
 
 def test_idemp_key_format():

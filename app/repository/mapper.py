@@ -8,9 +8,6 @@ Implementacao completa: FASE 2, task 2.1.
 """
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Optional
-
 
 def curso_model_to_dto(model) -> dict:
     """

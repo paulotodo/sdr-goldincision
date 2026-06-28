@@ -42,8 +42,12 @@ services:
       - webhook_token
     environment:
       # URLs dos servicos internos (sem credenciais — credenciais via secrets)
-      DATABASE_URL: "postgresql+asyncpg://sdr:${POSTGRES_PASSWORD:-sdrsecret}@postgres:5432/sdr"
-      REDIS_URL: "redis://redis:6379/0"
+      # Nomes COMPLETOS dos servicos (unicos no swarm) — o app esta em duas redes
+      # (sdr-internal + network_main) e os aliases curtos "postgres"/"redis"
+      # colidiriam com outras stacks (postgres_postgres, n8n-data_redis) em
+      # network_main. Os nomes completos so existem na sdr-internal.
+      DATABASE_URL: "postgresql+asyncpg://sdr:${POSTGRES_PASSWORD:-sdrsecret}@sdr-whatsapp_postgres:5432/sdr"
+      REDIS_URL: "redis://sdr-whatsapp_redis:6379/0"
       # Caminhos para os secrets montados
       OPENAI_API_KEY_FILE: "/run/secrets/openai_api_key"
       CHATMASTER_TOKEN_FILE: "/run/secrets/chatmaster_token"

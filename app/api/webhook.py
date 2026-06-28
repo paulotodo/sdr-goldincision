@@ -22,7 +22,7 @@ import hmac
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Header, Request, status
+from fastapi import APIRouter, BackgroundTasks, Header, Query, Request, status
 from pydantic import ValidationError
 
 from app.config import settings
@@ -309,6 +309,7 @@ async def receive_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     x_webhook_token: Optional[str] = Header(default=None, alias="X-Webhook-Token"),
+    token: Optional[str] = Query(default=None),
 ) -> dict:
     """
     Recebe evento do ChatMaster encaminhado pelo n8n.
@@ -338,14 +339,18 @@ async def receive_webhook(
     # 2. Validacao opcional de X-Webhook-Token (defesa em profundidade SEC-WH-1)
     # -------------------------------------------------------------------------
     if settings.webhook_token:
-        provided = x_webhook_token or ""
+        # Aceita o token via header X-Webhook-Token OU via query param ?token=
+        # (ChatMaster pode so permitir configurar URL, sem headers custom).
+        expected = settings.webhook_token.encode("utf-8")
+        provided_header = (x_webhook_token or "").encode("utf-8")
+        provided_query = (token or "").encode("utf-8")
         # Comparacao em tempo constante (anti-timing — SEC-WH-1)
-        if not hmac.compare_digest(
-            provided.encode("utf-8"),
-            settings.webhook_token.encode("utf-8"),
-        ):
+        ok = hmac.compare_digest(provided_header, expected) or hmac.compare_digest(
+            provided_query, expected
+        )
+        if not ok:
             logger.warning(
-                "webhook: X-Webhook-Token invalido — descartando (sem retry trigger)"
+                "webhook: token invalido (header/query) — descartando (sem retry trigger)"
             )
             return {"ack": "ok"}  # 200 para nao triggar retry
 

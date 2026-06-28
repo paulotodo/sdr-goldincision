@@ -39,7 +39,10 @@ services:
       - openai_api_key
       - chatmaster_token
       - admin_token
-      - webhook_token
+      # webhook_token: secret versionado (secrets sao imutaveis) montado como
+      # /run/secrets/webhook_token. Token real ativo desde a exposicao publica.
+      - source: webhook_token_v1
+        target: webhook_token
     environment:
       # URLs dos servicos internos (sem credenciais — credenciais via secrets)
       # Nomes COMPLETOS dos servicos (unicos no swarm) — o app esta em duas redes
@@ -89,6 +92,13 @@ services:
         - "traefik.http.routers.sdr-health.tls=true"
         - "traefik.http.routers.sdr-health.tls.certresolver=letsencryptresolver"
         - "traefik.http.routers.sdr-health.service=sdr-app"
+        # Router para /webhook/chatmaster (EXPOSTO para o ChatMaster chamar direto).
+        # Protegido por token: o app valida ?token= (query) OU header X-Webhook-Token.
+        - "traefik.http.routers.sdr-webhook.rule=Host(`${SDR_HOST:-sdr.todo-tips.com}`) && Path(`/webhook/chatmaster`)"
+        - "traefik.http.routers.sdr-webhook.entrypoints=web,websecure"
+        - "traefik.http.routers.sdr-webhook.tls=true"
+        - "traefik.http.routers.sdr-webhook.tls.certresolver=letsencryptresolver"
+        - "traefik.http.routers.sdr-webhook.service=sdr-app"
         # Servico (porta interna)
         - "traefik.http.services.sdr-app.loadbalancer.server.port=8000"
         # NOTA: /webhook/chatmaster NAO tem label Traefik — apenas overlay interna
@@ -165,5 +175,5 @@ secrets:
     external: true
   admin_token:
     external: true
-  webhook_token:
+  webhook_token_v1:
     external: true

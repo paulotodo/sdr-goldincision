@@ -518,8 +518,12 @@ envio da resposta, custo estimado.
   próprio, em rede overlay própria.
 
 - **FR-029**: O serviço de aplicação DEVE ingressar na rede do Traefik
-  apenas para roteamento HTTP. Os serviços Postgres e Redis NÃO devem
-  ser expostos a redes externas.
+  apenas para roteamento HTTP das rotas públicas `/admin/*` e `/health`.
+  O webhook inbound (`/webhook/chatmaster`) NÃO DEVE ter rota pública no
+  Traefik: é recebido pela rede overlay interna compartilhada com o n8n
+  (o app atacha-se a essa overlay; o serviço do n8n NUNCA é modificado).
+  Os serviços Postgres e Redis NÃO devem ser expostos a redes externas.
+  (Decisão block-001/dec-015.)
 
 - **FR-030**: O sistema DEVE expor endpoint de healthcheck que o Traefik
   e o Swarm possam verificar periodicamente.
@@ -633,3 +637,17 @@ envio da resposta, custo estimado.
 > GoldIncision e o briefing cobrem os requisitos com suficiente precisão.
 > Todos os detalhes de implementação (tecnologias, estrutura de código,
 > DDL, endpoints exatos) serão resolvidos na fase `/plan`.
+
+### Exposição de rede do webhook (block-001 / dec-015)
+
+> **Q (gate owasp-security, SEC-WH-1 HIGH)**: webhook público sem autenticação
+> de origem permite forja de eventos e consumo de budget. Qual mecanismo de
+> autenticação? **A (operador)**: o webhook NÃO será exposto publicamente via
+> Traefik. O n8n roda no mesmo Docker Swarm e posta o evento direto no serviço
+> do agente pela rede overlay interna compartilhada
+> (`http://sdr-agente-app:8000/webhook/chatmaster`), sem rota pública. Apenas
+> `/admin/*` (token) e `/health` são roteados pelo Traefik. O agente atacha-se
+> a uma overlay alcançável pelo n8n — somente o NOSSO serviço é atachado; o
+> serviço do n8n nunca é alterado. Defesa em profundidade opcional:
+> `X-Webhook-Token` (segredo compartilhado) validado na app. Ver FR-029,
+> `contracts/webhook-inbound.md` §Exposição de rede e `plan.md` §Segurança.

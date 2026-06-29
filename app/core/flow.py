@@ -498,6 +498,55 @@ _T: dict[str, dict[str, str]] = {
             "médico con registro profesional activo en tu país? 🩺"
         ),
     },
+    # Qualificacao medica fiel ao Mapa Mestre (texto especifico por caminho)
+    "qualif_medico_c1": {
+        "pt": (
+            "Perfeito! O Curso Online de Harmonização Glútea é uma formação exclusiva "
+            "para médicos. 🩺\nAntes de prosseguirmos, preciso confirmar uma informação: "
+            "você é médico com registro profissional ativo em seu país?"
+        ),
+        "en": (
+            "Perfect! The Online Gluteal Harmonization course is a training exclusive "
+            "to physicians. 🩺\nBefore we proceed, I need to confirm one detail: are you "
+            "a physician with an active professional registration in your country?"
+        ),
+        "es": (
+            "¡Perfecto! El Curso Online de Armonización Glútea es una formación "
+            "exclusiva para médicos. 🩺\nAntes de continuar, necesito confirmar un dato: "
+            "¿eres médico con registro profesional activo en tu país?"
+        ),
+    },
+    "qualif_medico_c2": {
+        "pt": (
+            "Perfeito! Os Cursos Presenciais de Harmonização Glútea são exclusivos "
+            "para médicos. 🩺\nAntes de prosseguirmos, preciso confirmar uma informação: "
+            "você é médico com registro profissional ativo em seu país?"
+        ),
+        "en": (
+            "Perfect! The in-person Gluteal Harmonization courses are exclusive to "
+            "physicians. 🩺\nBefore we proceed, I need to confirm one detail: are you a "
+            "physician with an active professional registration in your country?"
+        ),
+        "es": (
+            "¡Perfecto! Los Cursos Presenciales de Armonización Glútea son exclusivos "
+            "para médicos. 🩺\nAntes de continuar, necesito confirmar un dato: ¿eres "
+            "médico con registro profesional activo en tu país?"
+        ),
+    },
+    "qualif_medico_lic": {
+        "pt": (
+            "O Licenciamento GoldIncision é um programa exclusivo para médicos. 🩺\n"
+            "Você é médico com registro profissional ativo em seu país?"
+        ),
+        "en": (
+            "GoldIncision Licensing is a program exclusive to physicians. 🩺\n"
+            "Are you a physician with an active professional registration in your country?"
+        ),
+        "es": (
+            "El Licenciamiento GoldIncision es un programa exclusivo para médicos. 🩺\n"
+            "¿Eres médico con registro profesional activo en tu país?"
+        ),
+    },
     "pergunta_experiencia": {
         "pt": (
             "Para indicar a formação mais adequada ao seu momento profissional: você "
@@ -880,7 +929,9 @@ class FlowEngine:
             if objetivo == "incorporar":
                 # Sub-caminho 1 → qualificar medico (Licenciamento)
                 updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO
-                pergunta = await self._gerar_pergunta_medico(idioma)
+                pergunta = await self._gerar_pergunta_medico(
+                    idioma, CaminhoMapaMestre.SISTEMA_GOLDINCISION
+                )
                 return FlowResult(
                     pergunta, "continue", CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                     ETAPA_SISTEMA_LICENCIAMENTO, updates,
@@ -905,7 +956,10 @@ class FlowEngine:
             if eh_medico is None:
                 return await self._reformular_ou_handoff(
                     context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
-                    ETAPA_SISTEMA_LICENCIAMENTO, await self._gerar_pergunta_medico(idioma),
+                    ETAPA_SISTEMA_LICENCIAMENTO,
+                    await self._gerar_pergunta_medico(
+                        idioma, CaminhoMapaMestre.SISTEMA_GOLDINCISION
+                    ),
                 )
             context.eh_medico = eh_medico
             updates["eh_medico"] = eh_medico
@@ -1018,7 +1072,7 @@ class FlowEngine:
             if eh_medico is None:
                 return await self._reformular_ou_handoff(
                     context, updates, cam, ETAPA_LINK,
-                    await self._gerar_pergunta_medico(idioma),
+                    await self._gerar_pergunta_medico(idioma, cam),
                 )
             context.eh_medico = eh_medico
             updates["eh_medico"] = eh_medico
@@ -1034,10 +1088,10 @@ class FlowEngine:
                 context.eh_medico = eh_medico
                 updates["eh_medico"] = eh_medico
                 _tent_clear(context, updates)
-            elif not _eh_pergunta_informativa(user_message):
+            elif not _eh_pergunta(user_message):
                 return await self._reformular_ou_handoff(
                     context, updates, cam, ETAPA_QUALIF_MEDICO,
-                    await self._gerar_pergunta_medico(idioma),
+                    await self._gerar_pergunta_medico(idioma, cam),
                 )
 
         # Sinal forte de fechamento (quer o link / inscrever-se): conduzir ao
@@ -1048,11 +1102,12 @@ class FlowEngine:
             updates["etapa_mapa_mestre"] = ETAPA_FECHAMENTO
             return await self._close_curso_online_link(context, updates)
 
-        # Pergunta informativa direta (preco/conteudo/duracao/certificado) ANTES
-        # de qualificar → responder da Base na hora (Mapa Mestre, REGRA do Caminho 1).
+        # Pergunta direta (preco/conteudo/duracao/certificado OU pergunta geral sobre
+        # o curso) ANTES de qualificar → responder da Base na hora, sem disparar o gate
+        # medico (Mapa Mestre, REGRA do Caminho 1: evita "Quanto custa? → Você é médico?").
         # Limpa o contador de tentativas: a mudanca de etapa (→ duvidas) nao deve
         # deixar preso o contador de qualif_medico (evita handoff prematuro).
-        if context.eh_medico is None and _eh_pergunta_informativa(user_message):
+        if context.eh_medico is None and _eh_pergunta(user_message):
             _tent_clear(context, updates)
             return await self._responder_duvida_online(context, user_message, updates)
 
@@ -1060,7 +1115,7 @@ class FlowEngine:
         if context.eh_medico is None:
             updates["etapa_mapa_mestre"] = ETAPA_QUALIF_MEDICO
             return FlowResult(
-                await self._gerar_pergunta_medico(idioma), "continue",
+                await self._gerar_pergunta_medico(idioma, cam), "continue",
                 cam, ETAPA_QUALIF_MEDICO, updates,
             )
         if context.eh_medico is False:
@@ -1125,7 +1180,7 @@ class FlowEngine:
         # Medico desconhecido → qualificar antes de liberar o link (gate de fechamento)
         updates["etapa_mapa_mestre"] = ETAPA_LINK
         return FlowResult(
-            await self._gerar_pergunta_medico(context.idioma), "continue",
+            await self._gerar_pergunta_medico(context.idioma, cam), "continue",
             cam, ETAPA_LINK, updates,
         )
 
@@ -1178,7 +1233,7 @@ class FlowEngine:
             else:
                 return await self._reformular_ou_handoff(
                     context, updates, cam, ETAPA_QUALIF_MEDICO,
-                    await self._gerar_pergunta_medico(idioma),
+                    await self._gerar_pergunta_medico(idioma, cam),
                 )
 
         if context.etapa == ETAPA_QUALIF_EXPERIENCIA and context.experiencia_corporal is None:
@@ -1221,7 +1276,7 @@ class FlowEngine:
         if context.eh_medico is None:
             updates["etapa_mapa_mestre"] = ETAPA_QUALIF_MEDICO
             return FlowResult(
-                await self._gerar_pergunta_medico(idioma), "continue",
+                await self._gerar_pergunta_medico(idioma, cam), "continue",
                 cam, ETAPA_QUALIF_MEDICO, updates,
             )
         if context.eh_medico is False:
@@ -1455,8 +1510,16 @@ class FlowEngine:
     # Helpers de geracao de perguntas padrao (texto fixo — anti-alucinacao)
     # ------------------------------------------------------------------
 
-    async def _gerar_pergunta_medico(self, idioma: str) -> str:
-        return _t("pergunta_medico", idioma)
+    async def _gerar_pergunta_medico(
+        self, idioma: str, caminho: Optional[int] = None
+    ) -> str:
+        """Pergunta de qualificacao medica fiel ao Mapa Mestre (texto por caminho)."""
+        chave = {
+            CaminhoMapaMestre.CURSO_ONLINE_HG: "qualif_medico_c1",
+            CaminhoMapaMestre.CURSOS_PRESENCIAIS: "qualif_medico_c2",
+            CaminhoMapaMestre.SISTEMA_GOLDINCISION: "qualif_medico_lic",
+        }.get(caminho)
+        return (_t(chave, idioma) if chave else "") or _t("pergunta_medico", idioma)
 
     async def _gerar_pergunta_experiencia(self, idioma: str) -> str:
         return _t("pergunta_experiencia", idioma)
@@ -1716,8 +1779,11 @@ def _eh_pergunta(texto: str) -> bool:
     if _eh_pergunta_informativa(texto):
         return True
     palavras = ["qual", "quais", "como", "quando", "onde", "quanto", "porque",
-                "pode me", "gostaria de saber", "queria saber", "what", "how",
-                "which", "tem ", "existe", "ha ", "há "]
+                "pode me", "gostaria de saber", "gostaria de informac", "queria saber",
+                "quero saber", "me fala", "me conta", "me explica", "fala sobre",
+                "conta sobre", "sobre o curso", "saber mais", "informacoes",
+                "informacao", "detalhes", "what", "how", "which", "tell me",
+                "tem ", "existe", "ha ", "há "]
     return any(t.startswith(p) or f" {p}" in f" {t}" for p in palavras)
 
 

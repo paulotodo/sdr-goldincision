@@ -274,6 +274,46 @@ async def test_c1_link_em_ingles():
     assert "https://x/en" in r.response_text
 
 
+@pytest.mark.asyncio
+async def test_c1_pergunta_geral_responde_sem_gate_medico():
+    """REGRA do Caminho 1: pergunta GERAL sobre o curso (sem preço explícito) →
+    responde da Base, sem disparar 'você é médico?'."""
+    for msg in [
+        "quais são os cursos online?",
+        "me fala sobre o curso online",
+        "quero saber sobre o curso",
+    ]:
+        resp = MockResponder(response_text="info do curso")
+        eng = engine(ClassificacaoIntencao.CURSO_ONLINE, responder=resp)
+        ctx = make_context(caminho=1)  # eh_medico None
+        r = await eng.process(1, msg, ctx)
+        assert r.etapa == ETAPA_DUVIDAS, f"{msg!r} caiu em {r.etapa}"
+        assert len(resp.generate_calls) == 1, f"não respondeu via base para {msg!r}"
+
+
+@pytest.mark.asyncio
+async def test_c1_intencao_de_compra_ainda_qualifica():
+    """'quero o curso' não é pergunta → mantém a qualificação médica primeiro."""
+    eng = engine(ClassificacaoIntencao.CURSO_ONLINE)
+    ctx = make_context(caminho=1)
+    r = await eng.process(1, "quero o curso online", ctx)
+    assert r.etapa == ETAPA_QUALIF_MEDICO
+
+
+@pytest.mark.asyncio
+async def test_qualif_medico_fiel_por_caminho():
+    """Texto de qualificação específico por caminho (fiel ao Mapa Mestre)."""
+    eng = engine()
+    assert "Curso Online" in await eng._gerar_pergunta_medico(
+        "pt", CaminhoMapaMestre.CURSO_ONLINE_HG)
+    assert "Presenciais" in await eng._gerar_pergunta_medico(
+        "pt", CaminhoMapaMestre.CURSOS_PRESENCIAIS)
+    assert "Licenciamento" in await eng._gerar_pergunta_medico(
+        "pt", CaminhoMapaMestre.SISTEMA_GOLDINCISION)
+    # Sem caminho → fallback genérico (não vazio)
+    assert await eng._gerar_pergunta_medico("pt")
+
+
 # ===========================================================================
 # Caminho 2 — Presenciais
 # ===========================================================================

@@ -29,6 +29,27 @@ def test_app_bootstraps(client):
     assert client is not None
 
 
+def test_logging_configurado_para_stdout():
+    """_configure_logging deixa o root logger em <= INFO com handler, para que os
+    logger.info da aplicacao apareçam no stdout em producao."""
+    import logging
+
+    import app.main
+
+    root = logging.getLogger()
+    saved_handlers, saved_level = root.handlers[:], root.level
+    try:
+        app.main._configure_logging()
+        assert root.handlers, "root logger sem handler — logs da app nao chegam ao stdout"
+        assert root.level <= logging.INFO, "root acima de INFO — logger.info descartado"
+        # Um logger de aplicacao propaga para o root e emite via handler do root
+        assert logging.getLogger("app.core.flow").getEffectiveLevel() <= logging.INFO
+    finally:
+        # Restaura o estado do logging para nao afetar a captura do pytest nos demais testes
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
+
+
 def test_health_returns_200(client):
     """GET /health retorna 200."""
     response = client.get("/health")

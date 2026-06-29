@@ -7,6 +7,7 @@ Expoe get_redis_client() / get_session_factory() para uso por outros modulos.
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -16,6 +17,22 @@ from app.config import settings
 
 if TYPE_CHECKING:
     pass
+
+def _configure_logging() -> None:
+    """
+    Configura o root logger para o stdout. Sem isto, os logger.info da APLICACAO
+    (decisoes do fluxo, "webhook: motor processou", intent, responder) NAO chegam
+    ao stdout em producao — apenas os logs do uvicorn. Nivel via LOG_LEVEL (INFO).
+    `force=True` garante que a config valha mesmo se algum handler ja existir.
+    """
+    logging.basicConfig(
+        level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        force=True,
+    )
+
+
+_configure_logging()
 
 logger = logging.getLogger(__name__)
 

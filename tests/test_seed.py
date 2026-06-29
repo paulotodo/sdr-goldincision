@@ -14,7 +14,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.seed import CURSOS_SEED, LINKS_SEED, run_seed
+from app.seed import (
+    CURSOS_SEED,
+    LINKS_SEED,
+    _parse_faq,
+    _split_licenciamento_por_idioma,
+    run_seed,
+)
 
 # ---------------------------------------------------------------------------
 # Testes unitarios (sem DB real — verifica logica e chamadas)
@@ -78,6 +84,68 @@ def test_links_seed_slugs_existem_no_catalogo():
     slugs = {c["slug"] for c in CURSOS_SEED}
     for slug in LINKS_SEED:
         assert slug in slugs, f"LINKS_SEED referencia slug inexistente: {slug}"
+
+
+# ---------------------------------------------------------------------------
+# FAQ — parsing Q/A
+# ---------------------------------------------------------------------------
+
+def test_parse_faq_extrai_pares_e_secao():
+    """Q/A com cabecalho de secao e respostas curtas ('Sim') e longas."""
+    texto = (
+        "Elegibilidade\n"
+        "Quem pode participar?\n"
+        "Somente medicos com registro ativo.\n"
+        "E obrigatorio registro ativo?\n"
+        "Sim\n"
+        "Produtos\n"
+        "Qual a diferenca entre online e presencial?\n"
+        "O online e gravado; o presencial tem oficina de anatomia.\n"
+    )
+    pares = _parse_faq(texto)
+    perguntas = {q for _, q, _ in pares}
+    assert "Quem pode participar?" in perguntas
+    # resposta curta 'Sim' NAO pode ser confundida com cabecalho de secao
+    resp_obrig = next(r for s, q, r in pares if q == "E obrigatorio registro ativo?")
+    assert resp_obrig == "Sim"
+    # secao deve ser capturada
+    secoes = {s for s, _, _ in pares if s}
+    assert "Elegibilidade" in secoes
+    # 'Produtos' (header) nao deve virar resposta
+    assert all("Produtos" != r for _, _, r in pares)
+
+
+def test_parse_faq_vazio():
+    assert _parse_faq("") == []
+    assert _parse_faq(None) == []
+
+
+# ---------------------------------------------------------------------------
+# Licenciamento — split por idioma
+# ---------------------------------------------------------------------------
+
+def test_split_licenciamento_por_idioma():
+    texto = (
+        "Resumo executivo comum.\n"
+        "Parte 1 — Português\n"
+        "Conteudo em portugues aqui.\n"
+        "Parte 2 — Español\n"
+        "Contenido en espanol aqui.\n"
+        "Part 3 — English\n"
+        "English content here.\n"
+    )
+    out = _split_licenciamento_por_idioma(texto)
+    assert set(out.keys()) == {"pt", "es", "en"}
+    assert "portugues" in out["pt"].lower()
+    assert "espanol" in out["es"].lower()
+    assert "english content" in out["en"].lower()
+    # nao deve vazar conteudo de outro idioma
+    assert "english" not in out["pt"].lower()
+
+
+def test_split_licenciamento_vazio():
+    assert _split_licenciamento_por_idioma("") == {}
+    assert _split_licenciamento_por_idioma("sem marcadores") == {}
 
 
 @pytest.mark.asyncio

@@ -42,6 +42,7 @@ from app.repository.models import (
     CursoLink,
     CursoObjecao,
     CursoTurma,
+    Faq,
 )
 
 logger = logging.getLogger(__name__)
@@ -107,9 +108,14 @@ CURSOS_SEED: list[dict] = [
         "tipo": "licenciamento",
         "caminho_mapa_mestre": 3,       # Caminho 3 = Sistema GoldIncision
         "elegibilidade": {},
-        "arquivo_pt": "Apres Lic Internac Gold PORT.pdf",
-        "arquivo_en": "Apres Lic Internac Gold ING.pdf",
-        "arquivo_es": "Apres Lic Internac Gold ESP.pdf",
+        # Os 3 PDFs oficiais (PORT/ING/ESP) sao baseados em imagem (sem camada de
+        # texto) — pypdf extrai 0. O operador consolidou o conteudo num unico docx
+        # organizado por idioma (Parte 1 PT / Parte 2 ES / Part 3 EN), do qual
+        # extraimos pt/es/en (ver _split_licenciamento_por_idioma + run_seed).
+        "arquivo_pt": None,
+        "arquivo_en": None,
+        "arquivo_es": None,
+        "arquivo_multilingue": "GoldIncision_Base_Conhecimento.docx",
         "arquivo_objecoes_pt": None,
     },
     {
@@ -495,6 +501,120 @@ async def _upsert_turmas(
 
 
 # ---------------------------------------------------------------------------
+# Licenciamento: split do docx multilingue por idioma
+# ---------------------------------------------------------------------------
+
+# Marcadores de secao de idioma no docx consolidado (case-insensitive, sem acento
+# nao e necessario pois comparamos via 'in' no texto original).
+_LIC_MARCADORES = [
+    ("pt", "Parte 1 — Português"),
+    ("es", "Parte 2 — Español"),
+    ("en", "Part 3 — English"),
+]
+
+
+def _split_licenciamento_por_idioma(texto: str) -> dict[str, str]:
+    """
+    Divide o docx consolidado de Licenciamento em {pt, es, en} pelos marcadores
+    'Parte 1 — Português' / 'Parte 2 — Español' / 'Part 3 — English'.
+    Cada secao vai do seu marcador ate o proximo (en vai ate o fim).
+    Retorna apenas idiomas com conteudo nao-vazio.
+    """
+    out: dict[str, str] = {}
+    if not texto:
+        return out
+    # posicoes dos marcadores no texto
+    posicoes = []
+    for idioma, marcador in _LIC_MARCADORES:
+        idx = texto.find(marcador)
+        if idx != -1:
+            posicoes.append((idx, idioma, marcador))
+    posicoes.sort()
+    for i, (idx, idioma, marcador) in enumerate(posicoes):
+        inicio = idx + len(marcador)
+        fim = posicoes[i + 1][0] if i + 1 < len(posicoes) else len(texto)
+        trecho = texto[inicio:fim].strip()
+        if trecho:
+            out[idioma] = trecho
+    return out
+
+
+# ---------------------------------------------------------------------------
+# FAQ Oficial: parsing Q/A + upsert
+# ---------------------------------------------------------------------------
+
+_FAQ_ARQUIVO = "FAQ.docx"
+
+
+def _parse_faq(texto: Optional[str]) -> list[tuple[Optional[str], str, str]]:
+    """
+    Extrai tuplas (secao, pergunta, resposta) do FAQ.docx.
+
+    Heuristica: linhas terminadas em '?' sao perguntas; linhas seguintes (ate a
+    proxima pergunta) compoem a resposta. Cabecalhos de secao sao linhas curtas,
+    sem pontuacao final, que aparecem ANTES de uma pergunta — detectados como a
+    ultima linha de um bloco de resposta com mais de uma linha, ou como linhas
+    soltas antes da primeira pergunta.
+    """
+    if not texto:
+        return []
+    linhas = [ln.strip() for ln in texto.splitlines() if ln.strip()]
+    pares: list[tuple[Optional[str], str, str]] = []
+    secao: Optional[str] = None
+    pergunta: Optional[str] = None
+    ans: list[str] = []
+
+    def _eh_header(s: str) -> bool:
+        return len(s) <= 35 and not s.endswith((".", "!", "?", ":", ";", ")"))
+
+    def _flush() -> None:
+        nonlocal pergunta, ans, secao
+        if pergunta is None:
+            return
+        secao_proxima: Optional[str] = None
+        # Se ha mais de uma linha e a ultima parece header de secao, separa-a.
+        if len(ans) > 1 and _eh_header(ans[-1]):
+            secao_proxima = ans.pop()
+        resposta = "\n".join(ans).strip()
+        if resposta:
+            pares.append((secao, pergunta[:2000], resposta[:5000]))
+        pergunta = None
+        ans = []
+        if secao_proxima:
+            secao = secao_proxima
+
+    for ln in linhas:
+        if ln.endswith("?"):
+            if pergunta is None:
+                if ans:  # linhas antes da 1a pergunta = secao
+                    secao = ans[-1]
+                    ans = []
+                pergunta = ln
+            else:
+                _flush()
+                pergunta = ln
+        else:
+            ans.append(ln)
+    _flush()
+    return pares
+
+
+async def _upsert_faq(
+    session: AsyncSession, pares: list[tuple[Optional[str], str, str]], idioma: str = "pt"
+) -> None:
+    """Upsert idempotente do FAQ — delete+insert por idioma (re-seed limpo)."""
+    if not pares:
+        return
+    await session.execute(
+        text("DELETE FROM faq WHERE idioma = :idi"), {"idi": idioma}
+    )
+    for secao, pergunta, resposta in pares:
+        session.add(
+            Faq(idioma=idioma, secao=secao, pergunta=pergunta, resposta=resposta, ativo=True)
+        )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -541,6 +661,19 @@ async def run_seed(db_session: AsyncSession) -> None:
                     slug, idioma, len(texto),
                 )
 
+        # Apresentacao multilingue consolidada (ex.: Licenciamento — 1 docx com
+        # Parte 1 PT / Parte 2 ES / Part 3 EN). Split por idioma e upsert.
+        arquivo_multi = meta.get("arquivo_multilingue")
+        if arquivo_multi:
+            texto_multi = _extract_file(arquivo_multi)
+            por_idioma = _split_licenciamento_por_idioma(texto_multi or "")
+            for idioma, trecho in por_idioma.items():
+                await _upsert_apresentacao(db_session, curso_id, idioma, trecho)
+                logger.debug(
+                    "seed: apresentacao(multilingue) curso=%s idioma=%s chars=%d",
+                    slug, idioma, len(trecho),
+                )
+
         # Banco de objecoes (somente PT)
         objecao_filename = meta.get("arquivo_objecoes_pt")
         texto_objecoes = _extract_file(objecao_filename)
@@ -563,6 +696,13 @@ async def run_seed(db_session: AsyncSession) -> None:
             continue
         await _upsert_turmas(db_session, curso_id, turmas)
         logger.info("seed: %d turma(s) upserted para slug=%s", len(turmas), slug)
+
+    # Seed do FAQ Oficial (global — consultado na hierarquia apos a Base/Objecoes)
+    faq_texto = _extract_file(_FAQ_ARQUIVO)
+    faq_pares = _parse_faq(faq_texto)
+    if faq_pares:
+        await _upsert_faq(db_session, faq_pares, idioma="pt")
+        logger.info("seed: %d itens de FAQ upserted (pt)", len(faq_pares))
 
     await db_session.commit()
     logger.info("seed: concluido — %d cursos upserted.", len(CURSOS_SEED))

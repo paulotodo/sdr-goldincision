@@ -364,3 +364,29 @@ class EventoLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class Faq(Base):
+    """FAQ Oficial — consultada na hierarquia (Mapa Mestre -> Base -> Objecoes -> FAQ).
+
+    Global (nao por curso). Seedada do FAQ.docx; idioma 'pt' por padrao.
+    """
+    __tablename__ = "faq"
+    __table_args__ = (
+        UniqueConstraint("idioma", "pergunta", name="uq_faq_idioma_pergunta"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    idioma: Mapped[str] = mapped_column(
+        Text,
+        CheckConstraint("idioma IN ('pt','en','es')", name="ck_faq_idioma"),
+        nullable=False,
+        default="pt",
+    )
+    secao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pergunta: Mapped[str] = mapped_column(Text, nullable=False)
+    resposta: Mapped[str] = mapped_column(Text, nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

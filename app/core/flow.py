@@ -37,6 +37,7 @@ from app.repository.models import (
     CursoLink,
     CursoObjecao,
     CursoTurma,
+    Faq,
 )
 
 logger = logging.getLogger(__name__)
@@ -772,7 +773,29 @@ class FlowEngine:
         if link:
             sections.append(f"=== LINK DE INSCRICAO ({idioma}) ===\n{link.url}")
 
+        # FAQ Oficial (global) — ultimo na hierarquia (Mapa Mestre -> Base ->
+        # Objecoes -> FAQ). Consultar apenas quando a resposta nao estiver acima.
+        faq_text = await self._load_faq(idioma)
+        if faq_text:
+            sections.append(
+                "=== FAQ OFICIAL (consultar SOMENTE se a resposta nao estiver "
+                f"nas secoes acima) ===\n{faq_text}"
+            )
+
         return "\n\n".join(sections)
+
+    async def _load_faq(self, idioma: str) -> str:
+        """Carrega o FAQ Oficial ativo (fallback PT) como texto para grounding."""
+        stmt = select(Faq).where(Faq.ativo.is_(True), Faq.idioma == idioma)
+        result = await self._db.execute(stmt)
+        itens = result.scalars().all()
+        if not itens and idioma != "pt":
+            stmt_pt = select(Faq).where(Faq.ativo.is_(True), Faq.idioma == "pt")
+            result = await self._db.execute(stmt_pt)
+            itens = result.scalars().all()
+        if not itens:
+            return ""
+        return "\n".join(f"- P: {i.pergunta}\n  R: {i.resposta}" for i in itens)
 
     # ------------------------------------------------------------------
     # Helpers de geracao de perguntas padrao

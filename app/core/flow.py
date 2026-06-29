@@ -137,6 +137,15 @@ _ETAPAS_POS_APRESENTACAO = frozenset({
 # Numero da Nidia (fallback; ideal: carregar de settings)
 _NIDIA_DEFAULT = "+55 21 97423-9844"
 
+# Destinos LOGICOS de handoff (devem existir na HANDOFF_QUEUE_ALLOWLIST do
+# ChatMaster; o queueId concreto vem da config do operador, nunca do LLM).
+DEST_CONSULTORES = "consultores"    # generico de vendas / fallback
+DEST_PRESENCIAL = "presencial"      # consultor de cursos presenciais (C2)
+DEST_LICENCIAMENTO = "licenciamento"  # reuniao de Licenciamento (C3)
+DEST_FRANQUIA = "franquia"          # especialista de Franquia (C3)
+DEST_ESPECIALISTA = "especialista"  # diagnostico do Sistema (C3)
+DEST_SUPORTE = "suporte"            # equipe de suporte ao aluno (C4)
+
 # Limite de tentativas nao reconhecidas por etapa antes de encaminhar a humano.
 _MAX_TENTATIVAS = 3
 
@@ -536,12 +545,18 @@ class FlowResult:
         caminho: Optional[int],
         etapa: Optional[str],
         updates: Optional[dict] = None,
+        handoff_destino: Optional[str] = None,
+        handoff_motivo: Optional[str] = None,
     ):
         self.response_text = response_text
         self.action = action
         self.caminho = caminho
         self.etapa = etapa
         self.updates = updates or {}
+        # Destino LOGICO da fila de handoff (resolvido pelo caller via allowlist/
+        # config; NUNCA vem do LLM — SEC-LLM-3). So relevante quando action="handoff".
+        self.handoff_destino = handoff_destino
+        self.handoff_motivo = handoff_motivo
 
 
 class FlowEngine:
@@ -599,6 +614,7 @@ class FlowEngine:
             return self._handoff(
                 context, updates, context.caminho,
                 _t("humano_handoff", context.idioma), etapa=ETAPA_HANDOFF,
+                destino=DEST_CONSULTORES, motivo="pedido_humano",
             )
 
         # 3. Troca de caminho conservadora (Regra 10, mas sem reiniciar a jornada
@@ -667,12 +683,16 @@ class FlowEngine:
     def _handoff(
         self, context: SessionContext, updates: dict,
         caminho: Optional[int], texto: str, etapa: str = ETAPA_HANDOFF,
+        destino: str = DEST_CONSULTORES, motivo: Optional[str] = None,
     ) -> FlowResult:
         if caminho is not None:
             updates["caminho_atual"] = caminho
         updates["etapa_mapa_mestre"] = etapa
         _tent_clear(context, updates)
-        return FlowResult(texto, "handoff", caminho, etapa, updates)
+        return FlowResult(
+            texto, "handoff", caminho, etapa, updates,
+            handoff_destino=destino, handoff_motivo=motivo,
+        )
 
     async def _reformular_ou_handoff(
         self, context: SessionContext, updates: dict, caminho: int,
@@ -686,6 +706,7 @@ class FlowEngine:
         if n >= _MAX_TENTATIVAS:
             return self._handoff(
                 context, updates, caminho, _t("desistir_handoff", context.idioma),
+                destino=DEST_CONSULTORES, motivo=f"nao_reconhecido:{etapa}",
             )
         updates["etapa_mapa_mestre"] = etapa
         texto = pergunta
@@ -736,6 +757,7 @@ class FlowEngine:
             return self._handoff(
                 context, updates, CaminhoMapaMestre.ALUNO_SUPORTE,
                 _t("aluno_encaminhamento", context.idioma),
+                destino=DEST_SUPORTE, motivo=f"aluno:{opcao}",
             )
 
         # ETAPA 1 — apresentar o submenu
@@ -755,6 +777,7 @@ class FlowEngine:
         return self._handoff(
             context, updates, CaminhoMapaMestre.OUTRO_ASSUNTO,
             _t("outro_assunto", context.idioma),
+            destino=DEST_CONSULTORES, motivo="outro_assunto",
         )
 
     # ------------------------------------------------------------------
@@ -815,6 +838,7 @@ class FlowEngine:
                 return self._handoff(
                     context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                     _t("sistema_lic_naomedico", idioma),
+                    destino=DEST_FRANQUIA, motivo="licenciamento_nao_medico_oferece_franquia",
                 )
             # Medico → apresentar Licenciamento (verbatim da Base) + abrir duvidas
             apres = await self._load_apresentacao(_SLUG_LICENCIAMENTO, idioma)
@@ -835,6 +859,7 @@ class FlowEngine:
                 return self._handoff(
                     context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                     _t("sistema_reuniao_handoff", idioma),
+                    destino=DEST_LICENCIAMENTO, motivo="reuniao_licenciamento",
                 )
             # Duvida OU objecao (mesmo sem "?") → responder com grounding na Base
             # e no Banco de Objecoes do Licenciamento (nao encaminhar prematuramente).
@@ -864,6 +889,7 @@ class FlowEngine:
             return self._handoff(
                 context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                 _t("sistema_franquia_handoff", idioma),
+                destino=DEST_FRANQUIA, motivo="franquia",
             )
 
         # Sub-caminho 3 — Diagnostico: apos respostas → recomenda + especialista
@@ -871,6 +897,7 @@ class FlowEngine:
             return self._handoff(
                 context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                 _t("sistema_diagnostico_handoff", idioma),
+                destino=DEST_ESPECIALISTA, motivo="diagnostico_sistema",
             )
 
         # ETAPA 1 + ETAPA 2 (entrada): explicar o sistema e perguntar o objetivo
@@ -1035,6 +1062,7 @@ class FlowEngine:
             # Sem link cadastrado → encaminhar a um humano (nao inventar)
             return self._handoff(
                 context, updates, cam, _t("desistir_handoff", idioma),
+                destino=DEST_CONSULTORES, motivo="link_indisponivel",
             )
         texto = f"{_t('link_leadin', idioma)}\n{url}\n\n{_t('link_pos', idioma)}"
         updates["produto_interesse"] = "curso-online-hg"
@@ -1165,6 +1193,7 @@ class FlowEngine:
             if fech == "aceita":
                 return self._handoff(
                     context, updates, cam, _t("consultor_handoff", idioma),
+                    destino=DEST_PRESENCIAL, motivo=f"consultor_presencial:{slug}",
                 )
             if fech == "recusa":
                 updates["etapa_mapa_mestre"] = ETAPA_DUVIDAS

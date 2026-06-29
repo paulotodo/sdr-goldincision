@@ -289,13 +289,23 @@ class MemoryManager:
         ticket_id: int,
         caminho: Optional[int] = None,
         etapa: Optional[str] = None,
+        status: Optional[str] = None,
+        handoff_destino: Optional[str] = None,
+        handoff_motivo: Optional[str] = None,
     ) -> None:
-        """Atualiza caminho e etapa do Mapa Mestre no Ticket."""
+        """Atualiza caminho/etapa do Mapa Mestre e (opcionalmente) o estado de
+        handoff no Ticket (status, destino logico da fila e motivo)."""
         values: dict = {}
         if caminho is not None:
             values["caminho_atual"] = caminho
         if etapa is not None:
             values["etapa_mapa_mestre"] = etapa
+        if status is not None:
+            values["status"] = status
+        if handoff_destino is not None:
+            values["handoff_destino"] = handoff_destino
+        if handoff_motivo is not None:
+            values["handoff_motivo"] = handoff_motivo
         if not values:
             return
 

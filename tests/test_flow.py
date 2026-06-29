@@ -655,6 +655,46 @@ def test_sem_mais_duvidas():
 
 
 @pytest.mark.asyncio
+async def test_handoff_destino_por_tipo():
+    """Cada tipo de handoff carrega o destino lógico correto (roteamento de fila)."""
+    apres = {"hg360-sp": "X", "licenciamento-internacional": "Y"}
+
+    # C4 aluno/suporte → suporte
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=4, etapa=ETAPA_ALUNO_MENU)
+    r = await eng.process(1, "2", ctx)
+    assert r.action == "handoff" and r.handoff_destino == "suporte"
+
+    # C2 consultor presencial → presencial
+    eng = engine(ClassificacaoIntencao.AMBIGUA, apres=apres)
+    ctx = make_context(
+        caminho=2, etapa=ETAPA_DUVIDAS, eh_medico=True,
+        experiencia_corporal=True, produto_interesse="hg360-sp",
+    )
+    r = await eng.process(1, "sim, pode encaminhar ao consultor", ctx)
+    assert r.action == "handoff" and r.handoff_destino == "presencial"
+
+    # C3 reunião de licenciamento → licenciamento
+    eng = engine(ClassificacaoIntencao.AMBIGUA, apres=apres)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS, eh_medico=True)
+    r = await eng.process(1, "não tenho dúvidas, podemos marcar", ctx)
+    assert r.action == "handoff" and r.handoff_destino == "licenciamento"
+
+    # C3 franquia → franquia
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_FRANQUIA)
+    r = await eng.process(1, "sou investidor", ctx)
+    assert r.action == "handoff" and r.handoff_destino == "franquia"
+
+    # Pedido explícito de humano → consultores (genérico)
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=1, etapa=ETAPA_DUVIDAS, eh_medico=True)
+    r = await eng.process(1, "quero falar com um atendente", ctx)
+    assert r.action == "handoff" and r.handoff_destino == "consultores"
+    assert r.handoff_motivo == "pedido_humano"
+
+
+@pytest.mark.asyncio
 async def test_c3_licenciamento_objecao_vai_ao_llm_nao_handoff():
     """Objeção sem '?' na fase de dúvidas do Licenciamento → LLM (Banco de Objeções),
     não handoff prematuro de reunião."""

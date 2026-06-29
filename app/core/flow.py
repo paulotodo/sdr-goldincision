@@ -830,13 +830,14 @@ class FlowEngine:
         # Sub-caminho 1 — Licenciamento: fase de DUVIDAS
         if context.etapa == ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS:
             fech = _detectar_fechamento(user_message)
-            if fech == "aceita" or not _eh_pergunta(user_message):
-                # Sem mais duvidas / pronto → convidar para reuniao (handoff)
+            if fech == "aceita" or _sem_mais_duvidas(user_message):
+                # Pronto / sem mais duvidas → convidar para reuniao (handoff)
                 return self._handoff(
                     context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                     _t("sistema_reuniao_handoff", idioma),
                 )
-            # Duvida → responder com grounding na Base do Licenciamento
+            # Duvida OU objecao (mesmo sem "?") → responder com grounding na Base
+            # e no Banco de Objecoes do Licenciamento (nao encaminhar prematuramente).
             knowledge = await self._load_knowledge_by_slug(_SLUG_LICENCIAMENTO, idioma)
             history = self._memory.build_messages_for_llm(context, max_msgs=8)
             resposta, handoff = await self._responder.generate(
@@ -945,7 +946,10 @@ class FlowEngine:
 
         # Pergunta informativa direta (preco/conteudo/duracao/certificado) ANTES
         # de qualificar → responder da Base na hora (Mapa Mestre, REGRA do Caminho 1).
+        # Limpa o contador de tentativas: a mudanca de etapa (→ duvidas) nao deve
+        # deixar preso o contador de qualif_medico (evita handoff prematuro).
         if context.eh_medico is None and _eh_pergunta_informativa(user_message):
+            _tent_clear(context, updates)
             return await self._responder_duvida_online(context, user_message, updates)
 
         # Qualificacao medica (so quando nao e pergunta direta)
@@ -1470,57 +1474,85 @@ def _detectar_confirmacao(texto: str) -> Optional[bool]:
     """
     Detecta confirmacao sim/nao. Retorna True / False / None (indeterminado).
 
-    Negativos sao checados antes dos positivos. Positivos isolados ambiguos
-    ("sou", "tenho", "crm") foram REMOVIDOS para evitar falsos positivos —
-    exige-se um token mais especifico (endurecimento, #8).
+    Matching por PALAVRA INTEIRA para negacao curta (evita o falso-negativo de
+    'no'/'na' como contracao em PT — ex.: 'atendo NO Rio', 'registro NO CRM').
+    Frases especificas tratadas por substring. Positivos genericos de profissao
+    ('i am a') exigem contexto medico, para nao aprovar nao-medicos (FR-009).
     """
     t = _norm(texto)
+    toks = set(t.split())
 
-    negativos = [
+    palavras = t.split()
+    # Respostas secas / negacao inicial (EN: "No, I'm a nurse")
+    if t in {"nao", "no", "nope", "nah", "negativo", "jamais", "n"}:
+        return False
+    if palavras and palavras[0] in {"no", "nope", "nah"}:
+        return False
+    if t in {"sim", "yes", "s", "si", "claro", "isso", "ok", "positivo",
+             "afirmativo", "exato", "correto", "confirmo"}:
+        return True
+
+    # Frases negativas (substring)
+    neg_frases = [
         "nao sou", "nao tenho", "nao possuo", "nao soy", "no soy", "i am not",
-        "i'm not", "im not", "nunca", "nenhum", "negativo",
-        "nao", "no ", "not ",
+        "i'm not", "im not", "not a doctor", "sem registro", "sem crm",
     ]
-    positivos = [
-        "sim", "yes", "claro", "com certeza", "isso", "exato", "correto",
-        "afirmativo", "confirmo", "confirmando", "si soy", "soy medico",
-        "sou medico", "sou médico", "i am a", "i'm a", "im a", "tenho crm",
-        "possuo crm", "registro ativo", "registro profissional",
-    ]
+    if any(f in t for f in neg_frases):
+        return False
+    # Negacao por palavra inteira (PT 'nao' nunca e contracao; EN 'not')
+    if {"nao", "not", "nunca", "nenhum", "jamais"} & toks:
+        return False
 
-    for neg in negativos:
-        if neg in t:
-            return False
-    for pos in positivos:
-        if pos in t:
-            return True
-    # "sou"/"tenho" isolados so contam como SIM em mensagens MUITO curtas (resposta seca)
-    if t.strip() in {"sou", "tenho", "possuo", "crm", "medico", "médico"}:
+    # Frases/positivos especificos (medico)
+    pos_frases = [
+        "sou medico", "sou medica", "soy medico", "soy medica", "tenho crm",
+        "possuo crm", "registro ativo", "registro profissional", "medico com crm",
+        "i am a doctor", "i'm a doctor", "im a doctor", "i am a physician",
+        "i'm a physician",
+    ]
+    if any(f in t for f in pos_frases):
+        return True
+    if {"sim", "yes", "si", "claro", "isso", "exato", "correto",
+        "afirmativo", "confirmo", "positivo"} & toks:
         return True
     return None
 
 
 def _detectar_experiencia_corporal(texto: str) -> Optional[bool]:
-    """Detecta experiencia em harmonizacao corporal. True / False / None."""
+    """Detecta experiencia em harmonizacao corporal. True / False / None.
+
+    Matching por palavra inteira para negacao curta (evita 'no'/'na' contracao
+    em PT, ex.: 'faco gluteo NO consultorio'). Frases por substring.
+    """
     t = _norm(texto)
+    toks = set(t.split())
 
-    negativos = [
+    if t in {"nao", "no", "nope", "nah", "n"}:
+        return False
+    if t in {"sim", "yes", "si", "s"}:
+        return True
+
+    neg_frases = [
         "so facial", "apenas facial", "only facial", "solo facial", "somente facial",
-        "nao tenho", "nao possuo", "nao atuo", "nunca", "sem experiencia",
-        "no tengo", "nao", "no ",
+        "nao tenho", "nao possuo", "nao atuo", "nao faco", "sem experiencia",
+        "nunca atuei", "no tengo",
     ]
-    positivos = [
-        "sim", "yes", "ja atuo", "ja faco", "ja fiz", "tenho experiencia",
-        "experiencia corporal", "harmonizacao corporal", "preenchimento de gluteo",
-        "preenchimento gluteo", "gluteal", "corporal harmony", "corporal", "gluteo",
-    ]
+    if any(f in t for f in neg_frases):
+        return False
+    if {"nao", "not", "nunca"} & toks:
+        return False
 
-    for neg in negativos:
-        if neg in t:
-            return False
-    for pos in positivos:
-        if pos in t:
-            return True
+    pos_frases = [
+        "ja atuo", "ja faco", "ja fiz", "tenho experiencia", "experiencia corporal",
+        "harmonizacao corporal", "preenchimento de gluteo", "preenchimento gluteo",
+        "gluteal", "corporal harmony", "faco gluteo", "atuo com",
+    ]
+    if any(f in t for f in pos_frases):
+        return True
+    if {"corporal", "gluteo", "gluteal"} & toks:
+        return True
+    if {"sim", "yes", "si"} & toks:
+        return True
     return None
 
 
@@ -1539,25 +1571,35 @@ def _detectar_especialidade(texto: str) -> Optional[str]:
             if termo in t:
                 return especialidade
 
+    # Indicadores de "nao qualificante" — frases especificas (evita casar 'clinica'
+    # ou 'geral' isolados dentro de respostas comuns como 'atendo na minha clinica').
     sem_especialidade = [
-        "nao possuo", "sem especialidade", "nenhuma", "outra", "geral",
-        "clinico", "clinica", "no tengo", "no specialty", "other",
+        "nao possuo", "sem especialidade", "nenhuma especialidade", "outra especialidade",
+        "clinico geral", "clinica geral", "clinico-geral", "general practitioner",
+        "no tengo especialidad", "no specialty", "other specialty",
     ]
     for termo in sem_especialidade:
         if termo in t:
             return "outra"
+    toks = set(t.split())
+    if {"outra", "nenhuma", "other"} & toks:
+        return "outra"
     return None
 
 
 def _detectar_escolha_turma(texto: str) -> Optional[str]:
     """Detecta escolha de turma HG360 (SP ou Barcelona). Retorna slug ou None."""
     t = _norm(texto)
-    if any(k in t for k in ["barcelona", "espanha", "spain", "espana", "julho", "july", "julio"]):
+    toks = set(t.replace("️⃣", " ").split())
+    # Barcelona
+    if "barcelona" in t or {"espanha", "spain", "espana"} & toks or \
+            any(k in t for k in ["julho", "july", "julio"]):
         return _SLUG_HG360_BARCELONA
-    if any(k in t for k in ["sao paulo", "sp", "brasil", "brazil", "agosto", "august"]):
+    # Sao Paulo ('sp' so como palavra inteira — evita casar dentro de 'esperar')
+    if "sao paulo" in t or {"sp", "sampa"} & toks or \
+            {"brasil", "brazil"} & toks or any(k in t for k in ["agosto", "august"]):
         return _SLUG_HG360_SP
     # Numeros do menu (palavras inteiras)
-    toks = set(t.replace("️⃣", " ").split())
     if toks & {"1", "1.", "um", "one", "uno", "primeira", "primeiro"}:
         return _SLUG_HG360_SP
     if toks & {"2", "2.", "dois", "two", "dos", "segunda", "segundo"}:
@@ -1568,32 +1610,33 @@ def _detectar_escolha_turma(texto: str) -> Optional[str]:
 def _detectar_objetivo_sistema(texto: str) -> Optional[str]:
     """Caminho 3 / ETAPA 2 — objetivo: 'incorporar' | 'abrir' | 'nao_sei' | None."""
     t = _norm(texto)
-    # Opcao 3 — incerteza
-    if any(k in t for k in [
-        "nao tenho certeza", "nao sei", "ainda nao", "incerto", "duvida",
-        "qual modelo", "not sure", "no estoy seguro", "no se", "ayuda a decidir",
-    ]):
-        return "nao_sei"
-    # Opcao 2 — abrir clinica completa
-    if any(k in t for k in [
-        "abrir", "nova clinica", "clinica completa", "clinica goldincision",
-        "franquia", "franchise", "franquicia", "investir", "open", "abrir clinica",
-    ]):
-        return "abrir"
-    # Opcao 1 — incorporar a clinica atual
+    # Opcao 1 — incorporar a clinica atual (checada antes das demais: termos de
+    # acao concreta tem prioridade sobre marcadores genericos de incerteza)
     if any(k in t for k in [
         "incorporar", "minha clinica", "clinica atual", "ja possuo",
         "ja tenho clinica", "licenciamento", "licenciar", "licensing",
-        "incorporate", "incorporar a tecnica",
+        "incorporate",
     ]):
         return "incorporar"
+    # Opcao 2 — abrir clinica completa
+    if any(k in t for k in [
+        "abrir", "nova clinica", "clinica completa", "clinica goldincision",
+        "franquia", "franchise", "franquicia", "investir", "open clinic",
+    ]):
+        return "abrir"
+    # Opcao 3 — incerteza ('duvida' generico REMOVIDO — interceptava opcao 1/2)
+    if any(k in t for k in [
+        "nao tenho certeza", "nao sei", "ainda nao", "incerto", "qual modelo",
+        "not sure", "no estoy seguro", "ayuda a decidir",
+    ]):
+        return "nao_sei"
     # Numeros do menu (palavras inteiras)
     toks = set(t.replace("️⃣", " ").split())
     if toks & {"1", "1.", "um", "one", "uno"}:
         return "incorporar"
     if toks & {"2", "2.", "dois", "two", "dos"}:
         return "abrir"
-    if toks & {"3", "3.", "tres", "three", "tré"}:
+    if toks & {"3", "3.", "tres", "three"}:
         return "nao_sei"
     return None
 
@@ -1695,6 +1738,19 @@ def _detectar_fechamento(texto: str) -> Optional[str]:
     return None
 
 
+def _sem_mais_duvidas(texto: str) -> bool:
+    """Lead sinaliza que nao tem mais duvidas / esta pronto para avancar."""
+    t = _norm(texto)
+    cues = [
+        "nao tenho duvida", "nao tenho mais duvida", "sem duvida", "sem mais duvida",
+        "esta claro", "ficou claro", "entendi tudo", "era so isso", "era isso",
+        "so isso", "nada mais", "tudo certo", "podemos seguir", "pode prosseguir",
+        "pode marcar", "vamos marcar", "vamos agendar", "quero a reuniao",
+        "no more questions", "that's all", "thats all", "eso es todo",
+    ]
+    return any(c in t for c in cues)
+
+
 def _pede_humano(texto: str) -> bool:
     """Lead pede explicitamente atendimento humano (Regra 26)."""
     t = _norm(texto)
@@ -1709,10 +1765,17 @@ def _pede_humano(texto: str) -> bool:
 
 
 def _norm(texto: str) -> str:
-    """Normaliza para matching: minusculas, sem acentos, espacos colapsados."""
+    """Normaliza para matching: minusculas, sem acentos, sem pontuacao, espacos
+    colapsados. Remove vírgula/ponto etc. (ex.: 'nao, sou' → 'nao sou') mas
+    preserva apóstrofo (necessario para "i'm not")."""
     if not texto:
         return ""
     t = texto.lower().strip()
-    tabela = str.maketrans("áàâãäéèêëíìîïóòôõöúùûüç", "aaaaaeeeeiiiiooooouuuuc")
+    tabela = str.maketrans(
+        "áàâãäéèêëíìîïóòôõöúùûüç", "aaaaaeeeeiiiiooooouuuuc",
+    )
     t = t.translate(tabela)
+    # Pontuacao → espaco (mantem apostrofo)
+    for ch in ",.;:!?¿¡()[]{}\"":
+        t = t.replace(ch, " ")
     return " ".join(t.split())

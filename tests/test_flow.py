@@ -44,6 +44,8 @@ from app.core.flow import (
     CaminhoMapaMestre,
     FlowEngine,
     _detectar_confirmacao,
+    _detectar_escolha_turma,
+    _detectar_especialidade,
     _detectar_experiencia_corporal,
     _detectar_fechamento,
     _detectar_objetivo_sistema,
@@ -607,3 +609,61 @@ def test_pede_humano():
     assert _pede_humano("quero falar com um humano") is True
     assert _pede_humano("prefiro falar com um atendente") is True
     assert _pede_humano("quanto custa?") is False
+
+
+# --- Regressões de NLU (code-review): substring matching frágil ---
+
+def test_detectar_confirmacao_no_contracao_pt_nao_reprova_medico():
+    # 'no'/'na' são contrações em PT — não devem ser lidas como negação (FR-009)
+    assert _detectar_confirmacao("Sim, sou médico, atendo no Rio") is True
+    assert _detectar_confirmacao("Sim, tenho registro ativo no CRM do meu país") is True
+
+
+def test_detectar_confirmacao_nao_aprova_nao_medico():
+    # "I am a nurse" não deve confirmar médico (era falso-positivo por "i am a")
+    assert _detectar_confirmacao("I am a nurse") is not True
+    assert _detectar_confirmacao("No, I'm a nurse") is False
+
+
+def test_detectar_experiencia_no_contracao_pt():
+    assert _detectar_experiencia_corporal(
+        "faço preenchimento de glúteo no meu consultório"
+    ) is True
+
+
+def test_detectar_escolha_turma_sp_nao_casa_substring():
+    # 'sp' dentro de 'esperar' não deve fixar São Paulo
+    assert _detectar_escolha_turma("vou esperar pra decidir") is None
+
+
+def test_detectar_objetivo_sistema_duvida_nao_intercepta_opcao1():
+    assert _detectar_objetivo_sistema(
+        "tenho uma dúvida: quero incorporar à minha clínica"
+    ) == "incorporar"
+
+
+def test_detectar_especialidade_nao_qualificante_so_frases():
+    assert _detectar_especialidade("atendo na minha clínica") is None
+    assert _detectar_especialidade("sou clínico geral") == "outra"
+    assert _detectar_especialidade("dermatologia") == "dermatologia"
+
+
+def test_sem_mais_duvidas():
+    from app.core.flow import _sem_mais_duvidas
+    assert _sem_mais_duvidas("não tenho dúvidas, obrigado") is True
+    assert _sem_mais_duvidas("preciso pensar") is False
+
+
+@pytest.mark.asyncio
+async def test_c3_licenciamento_objecao_vai_ao_llm_nao_handoff():
+    """Objeção sem '?' na fase de dúvidas do Licenciamento → LLM (Banco de Objeções),
+    não handoff prematuro de reunião."""
+    resp = MockResponder(response_text="resposta de objeção")
+    eng = engine(ClassificacaoIntencao.AMBIGUA, responder=resp)
+    ctx = make_context(
+        caminho=3, etapa=ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS, eh_medico=True,
+    )
+    r = await eng.process(1, "achei o contrato complexo", ctx)
+    assert r.action == "continue"
+    assert r.response_text == "resposta de objeção"
+    assert len(resp.generate_calls) == 1

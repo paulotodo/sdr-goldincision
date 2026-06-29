@@ -72,12 +72,15 @@ if (
   número, sem `+`). O valor informado tem 12 dígitos (`55 51 9595 3520`); confirmar se não
   falta o 9º dígito do celular (ex.: `5551995953520`).
 
-## 2. Decisões em aberto (a confirmar antes de implementar)
-1. **Fila ausente no payload** (`queueId=None`): processar (compat, não quebrar fluxos sem
-   fila) ou bloquear (estrito)? — Recomendado: **processar + logar**.
-2. **`#reset` fora da fila 77**: deve funcionar para números de teste mesmo se a fila ≠ 77?
-   — Recomendado: **sim** (reset é ferramenta de teste; fica antes do gate).
-3. **Fila IA = 77 / humana = 78**: confirmado pelo enunciado.
+## 2. Decisões confirmadas (operador, 2026-06-29)
+1. **Fila ausente no payload** (`queueId=None`): **processar + logar** (compat). O gate só
+   bloqueia quando a fila vier explícita e ≠ 77.
+2. **`#reset`** fica **antes** do gate → funciona para números de teste mesmo fora da fila 77.
+3. **Fila IA = 77 / humana = 78** (confirmado).
+4. **Número de teste**: usar **555195953520 exatamente como informado** (sem inserir 9º dígito).
+   ⚠️ Se o `sender` real do ChatMaster vier com o 9 (`5551995953520`), o match falha — revalidar
+   no teste real e ajustar se necessário.
+5. **Inclusão do número**: **via admin API (imediato) E no env `RESET_TEST_NUMBERS` (persistente)**.
 
 ## 3. Testes (pytest)
 - Webhook `queueId=77` → `_process_consolidated_messages` é chamado.

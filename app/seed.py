@@ -570,6 +570,34 @@ def _split_licenciamento_por_idioma(texto: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 _FAQ_ARQUIVO = "FAQ.docx"
+# Traducoes estaticas (revisaveis) do FAQ para en/es — geradas a partir do
+# FAQ.docx (PT). Formato: {"en": [{secao,pergunta,resposta}], "es": [...]}.
+_FAQ_I18N_ARQUIVO = "faq_i18n.json"
+
+
+def _load_faq_i18n() -> dict[str, list[tuple[Optional[str], str, str]]]:
+    """Carrega traducoes do FAQ (en/es) do JSON estatico. Vazio se ausente."""
+    import json
+    path = KNOWLEDGE_BASE_PATH / _FAQ_I18N_ARQUIVO
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:
+        logger.warning("seed: erro ao ler %s: %s", _FAQ_I18N_ARQUIVO, exc)
+        return {}
+    out: dict[str, list[tuple[Optional[str], str, str]]] = {}
+    for idi in ("en", "es"):
+        itens = raw.get(idi) or []
+        pares: list[tuple[Optional[str], str, str]] = []
+        for it in itens:
+            q = (it.get("pergunta") or "").strip()
+            r = (it.get("resposta") or "").strip()
+            if q and r:
+                pares.append((it.get("secao"), q[:2000], r[:5000]))
+        if pares:
+            out[idi] = pares
+    return out
 
 
 def _parse_faq(texto: Optional[str]) -> list[tuple[Optional[str], str, str]]:
@@ -729,6 +757,12 @@ async def run_seed(db_session: AsyncSession) -> None:
     if faq_pares:
         await _upsert_faq(db_session, faq_pares, idioma="pt")
         logger.info("seed: %d itens de FAQ upserted (pt)", len(faq_pares))
+
+    # FAQ por idioma (en/es) — traducoes estaticas revisaveis
+    faq_i18n = _load_faq_i18n()
+    for idi, pares in faq_i18n.items():
+        await _upsert_faq(db_session, pares, idioma=idi)
+        logger.info("seed: %d itens de FAQ upserted (%s)", len(pares), idi)
 
     await db_session.commit()
     logger.info("seed: concluido — %d cursos upserted.", len(CURSOS_SEED))

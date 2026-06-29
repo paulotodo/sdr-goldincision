@@ -48,7 +48,10 @@ COMO HUMANIZAR A ENTREGA (sem alterar a estrutura nem inventar conteúdo):
 - Calor humano preservando o posicionamento premium; sem jargão de robô.
 
 FORMATO DAS RESPOSTAS:
-- Respostas curtas e objetivas; evite grandes blocos de texto.
+- Seja OBJETIVO e RESUMIDO: no máximo 3–4 frases curtas por resposta.
+- Responda APENAS o que foi perguntado; não antecipe nem despeje todo o conteúdo.
+- NÃO repita a apresentação inteira: se o lead quiser todos os detalhes, ofereça
+  conduzi-lo a uma conversa com um especialista que explica tudo pessoalmente.
 - Cordial, profissional e elegante.
 - Máximo UMA pergunta por mensagem (exceto quando o fluxo prevê opções de menu).
 - Emojis de forma natural e moderada.
@@ -135,6 +138,10 @@ _SLUG_PROMPTS = {
 # Marcador de handoff na resposta do LLM
 HANDOFF_MARKER = "[HANDOFF_NECESSARIO]"
 
+# Teto de tokens da geracao (concisao): respostas objetivas e resumidas, sem
+# despejar apresentacoes inteiras. Configuravel via settings.reasoning_max_tokens.
+REASONING_MAX_TOKENS = 280
+
 
 class GroundedResponder:
     """
@@ -144,8 +151,12 @@ class GroundedResponder:
     satisfazendo SEC-LLM-1 (anti prompt-injection).
     """
 
-    def __init__(self, openai_client: Any) -> None:
+    def __init__(
+        self, openai_client: Any, max_tokens: int = REASONING_MAX_TOKENS
+    ) -> None:
         self._client = openai_client
+        # Teto de concisao para a geracao de raciocinio (respostas resumidas).
+        self._max_tokens = max_tokens
 
     async def generate(
         self,
@@ -221,7 +232,7 @@ class GroundedResponder:
 
         try:
             raw_response = await self._client.chat_reasoning(
-                messages, max_tokens=600, temperature=0.3
+                messages, max_tokens=self._max_tokens, temperature=0.3
             )
         except Exception as exc:
             logger.error("responder: falha na geracao de resposta. err=%s", exc)

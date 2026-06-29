@@ -207,7 +207,10 @@ async def _handle_engine(
                 openai_client=openai_client,
             )
             intent_classifier = IntentClassifier(openai_client=openai_client)
-            responder = GroundedResponder(openai_client=openai_client)
+            responder = GroundedResponder(
+                openai_client=openai_client,
+                max_tokens=cfg.reasoning_max_tokens,
+            )
             engine = FlowEngine(
                 db_session=db_session,
                 intent_classifier=intent_classifier,
@@ -272,7 +275,9 @@ async def _handle_engine(
                 if cfg.chatmaster_token:
                     async with make_chatmaster_client(cfg) as cm_client:
                         await cm_client.send_message_blocks(
-                            str(sender), flow_result.response_text
+                            str(sender),
+                            flow_result.response_text,
+                            idioma=context.idioma,
                         )
                         if flow_result.action == "handoff":
                             try:

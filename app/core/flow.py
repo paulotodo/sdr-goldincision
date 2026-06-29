@@ -355,6 +355,32 @@ _T: dict[str, dict[str, str]] = {
             "Voy a dirigir tu interés para que agenden una reunión. 😊"
         ),
     },
+    # Resumo curto do Licenciamento (C3): o objetivo e qualificar e conduzir a uma
+    # reuniao com especialista, NUNCA vender nem despejar a apresentacao inteira.
+    "sistema_lic_resumo": {
+        "pt": (
+            "O Licenciamento Internacional GoldIncision é um programa exclusivo para "
+            "médicos que querem levar o método para a sua região com todo o suporte da "
+            "nossa estrutura. Os detalhes completos — condições, formato e próximos "
+            "passos — são apresentados por um especialista em uma conversa dedicada. "
+            "Posso esclarecer suas dúvidas iniciais por aqui; o que gostaria de saber "
+            "primeiro? 😊"
+        ),
+        "en": (
+            "GoldIncision International Licensing is an exclusive program for physicians "
+            "who want to bring the method to their region with the full support of our "
+            "structure. The complete details — terms, format and next steps — are "
+            "presented by a specialist in a dedicated conversation. I can clear up your "
+            "initial questions here; what would you like to know first? 😊"
+        ),
+        "es": (
+            "El Licenciamiento Internacional GoldIncision es un programa exclusivo para "
+            "médicos que desean llevar el método a su región con todo el soporte de "
+            "nuestra estructura. Los detalles completos — condiciones, formato y "
+            "próximos pasos — los presenta un especialista en una conversación dedicada. "
+            "Puedo aclarar tus dudas iniciales por aquí; ¿qué te gustaría saber primero? 😊"
+        ),
+    },
     "sistema_reuniao_handoff": {
         "pt": (
             "Maravilha! O próximo passo é uma conversa com um de nossos especialistas, "
@@ -971,11 +997,12 @@ class FlowEngine:
                     _t("sistema_lic_naomedico", idioma),
                     destino=DEST_FRANQUIA, motivo="licenciamento_nao_medico_oferece_franquia",
                 )
-            # Medico → apresentar Licenciamento (verbatim da Base) + abrir duvidas
-            apres = await self._load_apresentacao(_SLUG_LICENCIAMENTO, idioma)
-            leadin = f"{_saudacao(context)} 😊\n\n"
-            corpo = apres or ""
-            texto = (leadin + corpo + "\n\n" + _t("invite_duvidas", idioma)).strip()
+            # Medico → resumo OBJETIVO do Licenciamento + abrir duvidas. O objetivo do
+            # C3 e qualificar e conduzir a uma reuniao com especialista (nunca vender):
+            # por isso NAO despejamos a apresentacao verbatim longa (que virava rajada),
+            # apenas um resumo curto e o convite a esclarecer duvidas.
+            leadin = f"{_saudacao(context)}\n\n"
+            texto = (leadin + _t("sistema_lic_resumo", idioma)).strip()
             updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
             return FlowResult(
                 texto, "continue", CaminhoMapaMestre.SISTEMA_GOLDINCISION,

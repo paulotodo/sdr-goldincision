@@ -424,11 +424,16 @@ async def test_c3_incorporar_medico_apresenta_licenciamento_e_reuniao():
     r1 = await eng.process(1, "1", ctx)
     assert r1.etapa == ETAPA_SISTEMA_LICENCIAMENTO
 
-    # Confirma medico → apresenta licenciamento
+    # Confirma medico → abre duvidas com RESUMO curto (anti-rajada): NAO despeja a
+    # apresentacao verbatim longa; conduz a uma conversa com especialista.
     ctx.etapa = ETAPA_SISTEMA_LICENCIAMENTO
     r2 = await eng.process(1, "sim, sou médico", ctx)
     assert r2.etapa == ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
-    assert "APRES_LICENCIAMENTO" in r2.response_text
+    assert "APRES_LICENCIAMENTO" not in r2.response_text  # sem dump verbatim
+    assert "Licenciamento Internacional GoldIncision" in r2.response_text
+    assert "especialista" in r2.response_text.lower()
+    # Resposta objetiva: poucas frases (sem rajada de muitos blocos longos).
+    assert len(r2.response_text) < 700
 
     # Sem mais duvidas → convida reuniao (handoff)
     ctx.etapa = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS

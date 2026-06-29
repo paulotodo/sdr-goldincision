@@ -52,6 +52,7 @@ from app.core.flow import (
     _detectar_opcao_aluno,
     _eh_pergunta_informativa,
     _pede_humano,
+    _perfil_conhecido,
 )
 from app.core.intent import ClassificacaoIntencao, Idioma
 from app.core.memory import SessionContext
@@ -553,6 +554,52 @@ async def test_nao_repete_medico_ao_trocar_de_caminho():
     r = await eng.process(1, "na verdade quero o curso presencial", ctx)
     assert r.caminho == CaminhoMapaMestre.CURSOS_PRESENCIAIS
     assert r.etapa != ETAPA_QUALIF_MEDICO  # nao re-pergunta medico
+
+
+def test_perfil_conhecido_monta_fatos():
+    """_perfil_conhecido lista os fatos duraveis conhecidos do lead (anti-redundancia)."""
+    ctx = make_context(
+        eh_medico=True, especialidade="dermatologia",
+        experiencia_corporal=False, produto_interesse="hg360-sp", nome="Ana Souza",
+    )
+    bloco = _perfil_conhecido(ctx)
+    assert "FATOS JA CONHECIDOS DO LEAD" in bloco
+    assert "Ana Souza" in bloco
+    assert "e medico" in bloco.lower()
+    assert "dermatologia" in bloco
+    assert "hg360-sp" in bloco
+
+
+def test_perfil_conhecido_vazio_quando_nada_sabido():
+    """Sem fatos conhecidos (e sem nome), retorna string vazia."""
+    ctx = make_context(nome=None)
+    assert _perfil_conhecido(ctx) == ""
+
+
+@pytest.mark.asyncio
+async def test_c3_ja_medico_nao_repergunta_abre_licenciamento():
+    """Lead que JA confirmou ser medico (outro caminho) entra no C3 'incorporar' →
+    abre direto o resumo do Licenciamento + duvidas, SEM re-perguntar medico."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO, eh_medico=True)
+    r = await eng.process(1, "1", ctx)  # objetivo "incorporar"
+    # Pula a etapa de pergunta (ETAPA_SISTEMA_LICENCIAMENTO) e vai direto as duvidas.
+    assert r.etapa == ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
+    assert "Licenciamento Internacional GoldIncision" in r.response_text
+    # Conteudo e o resumo (convite a esclarecer), nao a pergunta de qualificacao.
+    assert "o que gostaria de saber primeiro" in r.response_text.lower()
+
+
+@pytest.mark.asyncio
+async def test_c3_ja_nao_medico_vai_franquia_sem_repergunta():
+    """Lead que JA informou NAO ser medico entra no C3 'incorporar' → handoff
+    Franquia direto, sem re-perguntar."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO, eh_medico=False)
+    r = await eng.process(1, "1", ctx)  # objetivo "incorporar"
+    assert r.action == "handoff"
+    assert r.handoff_destino == "franquia"
+    assert r.etapa != ETAPA_SISTEMA_LICENCIAMENTO  # nao foi para a pergunta
 
 
 @pytest.mark.asyncio

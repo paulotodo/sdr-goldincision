@@ -167,6 +167,7 @@ class GroundedResponder:
         session_history: Optional[list[dict]] = None,
         session_summary: Optional[str] = None,
         idioma: str = "pt",
+        known_facts: Optional[str] = None,
     ) -> tuple[str, bool]:
         """
         Gera resposta grounded no contexto de conhecimento oficial.
@@ -179,6 +180,8 @@ class GroundedResponder:
             session_history: historico de mensagens no formato OpenAI
             session_summary: resumo rolante da sessao (FR-019)
             idioma: codigo do idioma (pt/en/es)
+            known_facts: fatos ja conhecidos do lead (anti-redundancia) — quando
+                presente, e injetado no system prompt para o LLM nao re-perguntar
 
         Returns:
             (texto_resposta, handoff_necessario)
@@ -190,7 +193,10 @@ class GroundedResponder:
         # sub-cursos presenciais nao herdam mais os prompts de C3/C4).
         caminho_prompt = _SLUG_PROMPTS.get(caminho, _SYSTEM_CAMINHO_2)
 
-        # Sistema: instrucoes + caminho + grounding (nunca contaminado pelo usuario)
+        # Sistema: instrucoes + caminho + perfil conhecido + grounding (nunca
+        # contaminado pelo usuario). O perfil conhecido evita re-perguntar o que
+        # ja sabemos (anti-redundancia), sem alterar o grounding.
+        perfil_block = f"{known_facts}\n\n" if known_facts else ""
         system_content = (
             _SYSTEM_BASE.format(idioma_nome=idioma_nome)
             + "\n"
@@ -198,6 +204,7 @@ class GroundedResponder:
             + "\n"
             + f"ETAPA ATUAL: {etapa}"
             + "\n\n"
+            + perfil_block
             + "=== BASE DE CONHECIMENTO OFICIAL (use APENAS este conteudo) ===\n"
             + (knowledge_context or "Nenhum conteudo de base carregado para este caminho.")
             + "\n=== FIM DA BASE DE CONHECIMENTO ==="

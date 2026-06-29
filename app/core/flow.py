@@ -653,6 +653,37 @@ def _saudacao(context: SessionContext) -> str:
     return "Perfeito!"
 
 
+def _perfil_conhecido(context: SessionContext) -> str:
+    """
+    Bloco compacto com os fatos JA CONHECIDOS do lead (qualificacao duravel do
+    Contato), para o LLM personalizar e NAO re-perguntar (anti-redundancia).
+
+    Retorna "" quando nada e conhecido. O idioma ja e passado a parte ao responder,
+    por isso nao e repetido aqui.
+    """
+    fatos: list[str] = []
+    if (context.nome or "").strip():
+        fatos.append(f"- Nome: {context.nome.strip()}")
+    if context.eh_medico is True:
+        fatos.append("- Ja confirmou que e medico — NAO pergunte de novo se e medico.")
+    elif context.eh_medico is False:
+        fatos.append("- Ja informou que NAO e medico.")
+    if context.especialidade:
+        fatos.append(f"- Especialidade: {context.especialidade}")
+    if context.experiencia_corporal is True:
+        fatos.append("- Tem experiencia em Harmonizacao Corporal.")
+    elif context.experiencia_corporal is False:
+        fatos.append("- Sem experiencia em Harmonizacao Corporal.")
+    if context.produto_interesse:
+        fatos.append(f"- Interesse/curso: {context.produto_interesse}")
+    if not fatos:
+        return ""
+    return (
+        "=== FATOS JA CONHECIDOS DO LEAD (use para personalizar; NAO pergunte "
+        "novamente o que ja esta aqui) ===\n" + "\n".join(fatos)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Contador de tentativas (em Contato.etapa_funil — JSON, sem migration)
 # ---------------------------------------------------------------------------
@@ -953,7 +984,19 @@ class FlowEngine:
                 )
             _tent_clear(context, updates)
             if objetivo == "incorporar":
-                # Sub-caminho 1 → qualificar medico (Licenciamento)
+                # Sub-caminho 1 → Licenciamento. ANTI-REDUNDANCIA: nao re-perguntar se
+                # ja sabemos (a info e duravel e pode ter sido coletada em outro caminho,
+                # ex.: presencial). So perguntar quando eh_medico for desconhecido.
+                if context.eh_medico is True:
+                    return self._abrir_licenciamento_duvidas(context, updates)
+                if context.eh_medico is False:
+                    # Ja sabemos que nao e medico → Licenciamento e exclusivo; Franquia.
+                    return self._handoff(
+                        context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+                        _t("sistema_lic_naomedico", idioma),
+                        destino=DEST_FRANQUIA,
+                        motivo="licenciamento_nao_medico_oferece_franquia",
+                    )
                 updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO
                 pergunta = await self._gerar_pergunta_medico(
                     idioma, CaminhoMapaMestre.SISTEMA_GOLDINCISION
@@ -997,17 +1040,8 @@ class FlowEngine:
                     _t("sistema_lic_naomedico", idioma),
                     destino=DEST_FRANQUIA, motivo="licenciamento_nao_medico_oferece_franquia",
                 )
-            # Medico → resumo OBJETIVO do Licenciamento + abrir duvidas. O objetivo do
-            # C3 e qualificar e conduzir a uma reuniao com especialista (nunca vender):
-            # por isso NAO despejamos a apresentacao verbatim longa (que virava rajada),
-            # apenas um resumo curto e o convite a esclarecer duvidas.
-            leadin = f"{_saudacao(context)}\n\n"
-            texto = (leadin + _t("sistema_lic_resumo", idioma)).strip()
-            updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
-            return FlowResult(
-                texto, "continue", CaminhoMapaMestre.SISTEMA_GOLDINCISION,
-                ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS, updates,
-            )
+            # Medico → abrir duvidas do Licenciamento com resumo objetivo.
+            return self._abrir_licenciamento_duvidas(context, updates)
 
         # Sub-caminho 1 — Licenciamento: fase de DUVIDAS
         if context.etapa == ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS:
@@ -1027,7 +1061,7 @@ class FlowEngine:
                 user_message=user_message, caminho=_SLUG_LICENCIAMENTO,
                 etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
                 session_history=history, session_summary=context.resumo_rolante,
-                idioma=idioma,
+                idioma=idioma, known_facts=_perfil_conhecido(context),
             )
             updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
             action = "handoff" if handoff else "continue"
@@ -1063,6 +1097,26 @@ class FlowEngine:
         return FlowResult(
             _t("sistema_etapa1_2", idioma), "continue",
             CaminhoMapaMestre.SISTEMA_GOLDINCISION, ETAPA_SISTEMA_OBJETIVO, updates,
+        )
+
+    def _abrir_licenciamento_duvidas(
+        self, context: SessionContext, updates: dict
+    ) -> FlowResult:
+        """
+        Abre a fase de DUVIDAS do Licenciamento com um resumo objetivo (sem dump
+        verbatim da apresentacao). O objetivo do C3 e qualificar e conduzir a uma
+        reuniao com especialista (nunca vender).
+
+        Reusado tanto quando o lead acabou de confirmar que e medico quanto quando
+        ja sabiamos disso de outro caminho (anti-redundancia: nao re-perguntar).
+        """
+        idioma = context.idioma
+        leadin = f"{_saudacao(context)}\n\n"
+        texto = (leadin + _t("sistema_lic_resumo", idioma)).strip()
+        updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
+        return FlowResult(
+            texto, "continue", CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+            ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS, updates,
         )
 
     # ------------------------------------------------------------------
@@ -1187,7 +1241,7 @@ class FlowEngine:
             user_message=user_message, caminho="curso-online-hg",
             etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
             session_history=history, session_summary=context.resumo_rolante,
-            idioma=idioma,
+            idioma=idioma, known_facts=_perfil_conhecido(context),
         )
         updates["etapa_mapa_mestre"] = ETAPA_DUVIDAS
         action = "handoff" if handoff else "continue"
@@ -1403,7 +1457,7 @@ class FlowEngine:
             user_message=user_message, caminho=prompt_key,
             etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
             session_history=history, session_summary=context.resumo_rolante,
-            idioma=idioma,
+            idioma=idioma, known_facts=_perfil_conhecido(context),
         )
         updates["etapa_mapa_mestre"] = ETAPA_DUVIDAS
         action = "handoff" if handoff else "continue"

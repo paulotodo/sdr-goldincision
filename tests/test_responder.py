@@ -65,6 +65,48 @@ async def test_generate_default_max_tokens_e_conciso():
     assert REASONING_MAX_TOKENS <= 320, "teto deve ser conciso (era 600 antes)"
 
 
+@pytest.mark.asyncio
+async def test_generate_injeta_perfil_conhecido_no_system():
+    """known_facts e injetado no system prompt para o LLM nao re-perguntar."""
+    client = _make_openai_mock()
+    responder = GroundedResponder(openai_client=client)
+    facts = (
+        "=== FATOS JA CONHECIDOS DO LEAD ===\n"
+        "- Ja confirmou que e medico — NAO pergunte de novo se e medico."
+    )
+
+    await responder.generate(
+        user_message="quais os valores?",
+        caminho="licenciamento-internacional",
+        etapa="duvidas",
+        knowledge_context="Base.",
+        idioma="pt",
+        known_facts=facts,
+    )
+
+    messages = client.chat_reasoning.call_args.args[0]
+    system = messages[0]["content"]
+    assert facts in system
+
+
+@pytest.mark.asyncio
+async def test_generate_sem_perfil_nao_injeta_bloco():
+    """Sem known_facts, o system prompt nao ganha o bloco de fatos conhecidos."""
+    client = _make_openai_mock()
+    responder = GroundedResponder(openai_client=client)
+
+    await responder.generate(
+        user_message="oi",
+        caminho="hg360-sp",
+        etapa="duvidas",
+        knowledge_context="Base.",
+        idioma="pt",
+    )
+
+    system = client.chat_reasoning.call_args.args[0][0]["content"]
+    assert "FATOS JA CONHECIDOS DO LEAD" not in system
+
+
 def test_system_prompt_reforca_concisao():
     """O prompt base instrui respostas objetivas e resumidas, sem despejar tudo."""
     base_lower = _SYSTEM_BASE.lower()

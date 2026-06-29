@@ -69,6 +69,13 @@ services:
       # numero_teste (gestao dinamica via admin API /admin/numeros-teste).
       RESET_COMMAND: "${RESET_COMMAND:-#reset}"
       RESET_TEST_NUMBERS: "${RESET_TEST_NUMBERS:-5511967296849,5511941410998}"
+      # Pacing / anti-rajada (respeito ao rate limit da WhatsApp Cloud API).
+      # Defaults conservadores; ajustar conforme o limite real do ChatMaster/Meta.
+      WHATSAPP_MIN_INTERVAL_MS: "${WHATSAPP_MIN_INTERVAL_MS:-1000}"
+      MAX_MSGS_PER_TURN: "${MAX_MSGS_PER_TURN:-4}"
+      INTER_BLOCK_DELAY_SECONDS: "${INTER_BLOCK_DELAY_SECONDS:-1.0}"
+      # Concisao das respostas geradas (teto de tokens do raciocinio).
+      REASONING_MAX_TOKENS: "${REASONING_MAX_TOKENS:-280}"
     deploy:
       replicas: 1
       restart_policy:

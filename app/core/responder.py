@@ -250,9 +250,9 @@ class GroundedResponder:
         """
         if idioma == "en":
             return (
-                "Hello! I'm the Official Virtual Consultant of GoldIncision. "
-                "I'm here to help you find the most suitable training or service "
-                "for your needs.\n\n"
+                "Hello, and welcome to GoldIncision! 😊\n"
+                "I'm the Official Virtual Consultant, here to help you find the most "
+                "suitable training or service for your needs.\n\n"
                 "How can I help you today?\n"
                 "1️⃣ Online Course — Gluteal Harmonization\n"
                 "2️⃣ Presential Courses — Gluteal Harmonization (HG Module 1 / HG360)\n"
@@ -264,9 +264,10 @@ class GroundedResponder:
             )
         elif idioma == "es":
             return (
-                "¡Hola! Soy el Consultor Virtual Oficial de GoldIncision. "
-                "Estoy aquí para ayudarte a encontrar la formación o el servicio "
-                "más adecuado para tus necesidades.\n\n"
+                "¡Hola! ¡Bienvenido(a) a GoldIncision! 😊\n"
+                "Soy el Consultor Virtual Oficial y estoy aquí para ayudarte a "
+                "encontrar la formación o el servicio más adecuado para tus "
+                "necesidades.\n\n"
                 "¿Cómo puedo ayudarte?\n"
                 "1️⃣ Curso Online — Armonización Glútea\n"
                 "2️⃣ Cursos Presenciales — Armonización Glútea (HG Módulo 1 / HG360)\n"
@@ -278,9 +279,9 @@ class GroundedResponder:
             )
         else:  # pt default
             return (
-                "Olá! Sou o Consultor Oficial da GoldIncision e estou aqui para "
-                "ajudá-lo a encontrar a formação ou o atendimento mais adequado "
-                "às suas necessidades.\n\n"
+                "Olá! Seja bem-vindo(a) à GoldIncision! 😊\n"
+                "Sou o Consultor Oficial e estou aqui para ajudá-lo a encontrar a "
+                "formação ou o atendimento mais adequado às suas necessidades.\n\n"
                 "Como posso ajudá-lo hoje?\n"
                 "1️⃣ Curso Online de Harmonização Glútea\n"
                 "2️⃣ Cursos Presenciais de Harmonização Glútea\n"

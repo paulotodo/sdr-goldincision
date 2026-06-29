@@ -48,6 +48,42 @@ def _get_redis():
     return get_redis_client()
 
 
+async def _handle_reset(chamado_id: int, sender: Optional[str]) -> None:
+    """
+    Processa o comando #reset: so para numeros de teste autorizados.
+    Limpa a memoria do agente (Postgres + Redis) e confirma. Numero fora da
+    allowlist e ignorado silenciosamente (recurso invisivel para leads reais).
+    """
+    from app.config import settings as cfg
+    from app.core.reset import confirmacao_reset, is_numero_teste, reset_conversa
+    from app.main import get_session_factory
+
+    redis = _get_redis()
+    session_factory = get_session_factory()
+    autorizado = False
+    if session_factory is not None:
+        async with session_factory() as s:
+            autorizado = await is_numero_teste(s, str(sender or ""))
+            if autorizado:
+                await reset_conversa(s, redis, chamado_id)
+    if not autorizado:
+        logger.info(
+            "webhook: #reset de numero NAO autorizado chamado_id=%s — ignorado",
+            chamado_id,
+        )
+        return
+
+    logger.info("webhook: #reset executado chamado_id=%s", chamado_id)
+    # Confirmacao (texto fixo, nao passa pelo LLM)
+    if sender and cfg.chatmaster_token:
+        try:
+            from app.integrations.chatmaster import make_chatmaster_client
+            async with make_chatmaster_client(cfg) as cm:
+                await cm.send_message(str(sender), confirmacao_reset("pt"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("webhook: falha ao enviar confirmacao de reset: %s", exc)
+
+
 async def _handle_engine(
     chamado_id: int,
     messages: list[dict],
@@ -377,6 +413,19 @@ async def receive_webhook(
     # -------------------------------------------------------------------------
     if payload.isGroup:
         logger.debug("webhook: isGroup=true chamado_id=%s — ignorado", payload.chamadoId)
+        return {"ack": "ok"}
+
+    # -------------------------------------------------------------------------
+    # 5.bis Comando de reset de jornada (#reset) — apenas numeros de teste.
+    # Executa ANTES de handoff/idempotencia/debounce (reset imediato).
+    # -------------------------------------------------------------------------
+    _texto_msg = ""
+    for _m in payload.mensagem:
+        if getattr(_m, "type", None) == "text":
+            _texto_msg = (getattr(_m, "text", "") or "").strip()
+            break
+    if _texto_msg.lower() == (settings.reset_command or "#reset").strip().lower():
+        await _handle_reset(payload.chamadoId, payload.contact_number)
         return {"ack": "ok"}
 
     # -------------------------------------------------------------------------

@@ -22,6 +22,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +34,7 @@ from app.repository.models import (
     CursoMidia,
     CursoObjecao,
     CursoTurma,
+    NumeroTeste,
 )
 from app.schemas.curso import (
     CursoCreate,
@@ -624,3 +626,102 @@ async def update_link(
             db.add(CursoLink(curso_id=curso_id, idioma=idioma, url=url))
         await db.commit()
     return {"ok": True, "idioma": idioma, "url": url}
+
+
+# ---------------------------------------------------------------------------
+# Numeros de teste autorizados ao comando #reset (FR: reset de jornada)
+# ---------------------------------------------------------------------------
+
+class NumeroTesteCreate(BaseModel):
+    """Corpo para cadastro de numero de teste."""
+    model_config = ConfigDict(extra="forbid")
+    numero: str = Field(min_length=8, max_length=20)
+    descricao: Optional[str] = Field(default=None, max_length=200)
+
+
+@router.get(
+    "/numeros-teste",
+    summary="Lista numeros autorizados ao comando #reset",
+    response_model=None,
+)
+async def list_numeros_teste(
+    _token: str = Depends(verify_admin_token),
+) -> list[dict]:
+    factory = _get_session()
+    async with factory() as db:
+        rows = (
+            await db.execute(select(NumeroTeste).order_by(NumeroTeste.id))
+        ).scalars().all()
+        return [
+            {
+                "id": r.id,
+                "numero": r.numero,
+                "descricao": r.descricao,
+                "ativo": r.ativo,
+            }
+            for r in rows
+        ]
+
+
+@router.post(
+    "/numeros-teste",
+    status_code=status.HTTP_201_CREATED,
+    summary="Cadastra um numero de teste (#reset)",
+    response_model=None,
+)
+async def criar_numero_teste(
+    payload: NumeroTesteCreate,
+    _token: str = Depends(verify_admin_token),
+) -> dict:
+    numero = "".join(ch for ch in payload.numero if ch.isdigit())
+    if not numero:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="numero invalido (apenas digitos, DDI+DDD+numero)",
+        )
+    factory = _get_session()
+    async with factory() as db:
+        existe = (
+            await db.execute(select(NumeroTeste).where(NumeroTeste.numero == numero))
+        ).scalar_one_or_none()
+        if existe is not None:
+            # reativa se estava inativo (idempotente)
+            if not existe.ativo:
+                existe.ativo = True
+                if payload.descricao:
+                    existe.descricao = payload.descricao
+                await db.commit()
+                return {"id": existe.id, "numero": existe.numero, "ativo": True, "reativado": True}
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="numero ja cadastrado",
+            )
+        novo = NumeroTeste(numero=numero, descricao=payload.descricao, ativo=True)
+        db.add(novo)
+        await db.commit()
+        await db.refresh(novo)
+        return {"id": novo.id, "numero": novo.numero, "descricao": novo.descricao, "ativo": True}
+
+
+@router.delete(
+    "/numeros-teste/{numero}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove (desativa) um numero de teste",
+)
+async def remover_numero_teste(
+    numero: str,
+    _token: str = Depends(verify_admin_token),
+) -> None:
+    digitos = "".join(ch for ch in numero if ch.isdigit())
+    factory = _get_session()
+    async with factory() as db:
+        row = (
+            await db.execute(select(NumeroTeste).where(NumeroTeste.numero == digitos))
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="numero nao encontrado"
+            )
+        await db.delete(row)
+        await db.commit()
+    return None

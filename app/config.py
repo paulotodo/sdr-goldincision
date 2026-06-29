@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     # --- Webhook (opcional — defesa em profundidade) ---
     webhook_token: Optional[str] = None
 
+    # --- Reset de jornada (#reset) para numeros de teste autorizados ---
+    reset_command: str = "#reset"
+    # CSV usado para SEMEAR a tabela numero_teste no startup; gerencia dinamica
+    # via admin API (/admin/numeros-teste).
+    reset_test_numbers: str = "5511967296849,5511941410998"
+
+    @property
+    def reset_test_numbers_list(self) -> list[str]:
+        return [n.strip() for n in self.reset_test_numbers.split(",") if n.strip()]
+
     # --- Debounce ---
     debounce_seconds: int = 8
 

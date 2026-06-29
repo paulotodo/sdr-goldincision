@@ -65,6 +65,10 @@ services:
       # Handoff humano (API Atualizar Ticket): queueId da fila humana.
       HANDOFF_QUEUE_ID_DEFAULT: "${HANDOFF_QUEUE_ID_DEFAULT:-}"
       HANDOFF_QUEUE_IDS_JSON: "${HANDOFF_QUEUE_IDS_JSON:-}"
+      # Reset de jornada (#reset): frase + numeros que SEMEIAM a tabela
+      # numero_teste (gestao dinamica via admin API /admin/numeros-teste).
+      RESET_COMMAND: "${RESET_COMMAND:-#reset}"
+      RESET_TEST_NUMBERS: "${RESET_TEST_NUMBERS:-5511967296849,5511941410998}"
     deploy:
       replicas: 1
       restart_policy:

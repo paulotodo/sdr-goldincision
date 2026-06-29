@@ -43,6 +43,7 @@ from app.repository.models import (
     CursoObjecao,
     CursoTurma,
     Faq,
+    NumeroTeste,
 )
 
 logger = logging.getLogger(__name__)
@@ -763,6 +764,21 @@ async def run_seed(db_session: AsyncSession) -> None:
     for idi, pares in faq_i18n.items():
         await _upsert_faq(db_session, pares, idioma=idi)
         logger.info("seed: %d itens de FAQ upserted (%s)", len(pares), idi)
+
+    # Numeros de teste autorizados ao #reset (env SEMEIA; admin API gerencia).
+    # Upsert idempotente: nao desativa numeros adicionados via admin.
+    from app.config import settings as _cfg
+    for numero in _cfg.reset_test_numbers_list:
+        existe = (
+            await db_session.execute(
+                select(NumeroTeste).where(NumeroTeste.numero == numero)
+            )
+        ).scalar_one_or_none()
+        if existe is None:
+            db_session.add(
+                NumeroTeste(numero=numero, descricao="seed (env RESET_TEST_NUMBERS)", ativo=True)
+            )
+    logger.info("seed: numeros de teste semeados (%d do env)", len(_cfg.reset_test_numbers_list))
 
     await db_session.commit()
     logger.info("seed: concluido — %d cursos upserted.", len(CURSOS_SEED))

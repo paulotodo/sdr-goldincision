@@ -366,6 +366,22 @@ class EventoLog(Base):
     )
 
 
+class NumeroTeste(Base):
+    """Numeros autorizados a usar o comando de reset de jornada (#reset).
+
+    Semeado do env RESET_TEST_NUMBERS no startup; gerenciavel via admin API.
+    """
+    __tablename__ = "numero_teste"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    numero: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    descricao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Faq(Base):
     """FAQ Oficial — consultada na hierarquia (Mapa Mestre -> Base -> Objecoes -> FAQ).
 

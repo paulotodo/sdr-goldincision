@@ -65,6 +65,11 @@ class SessionContext:
     resumo_rolante: Optional[str] = None
     historico_recente: list[dict] = field(default_factory=list)
     sessao_id: Optional[int] = None
+    # Nome do lead (para humanizacao — "Dr(a). <nome>")
+    nome: Optional[str] = None
+    # Estado efemero do funil (JSON serializado em Contato.etapa_funil):
+    # contador de tentativas por etapa para evitar loops (sem migration).
+    etapa_funil: Optional[str] = None
 
 
 class MemoryManager:
@@ -168,6 +173,8 @@ class MemoryManager:
             resumo_rolante=sessao.resumo_rolante,
             historico_recente=historico_recente,
             sessao_id=sessao.id,
+            nome=contato.nome,
+            etapa_funil=contato.etapa_funil,
         )
 
         logger.debug(

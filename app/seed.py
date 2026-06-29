@@ -173,12 +173,38 @@ LINKS_SEED: dict[str, dict[str, str]] = {
 # ---------------------------------------------------------------------------
 
 def _extract_text_docx(path: Path) -> Optional[str]:
-    """Extrai texto de arquivo .docx usando python-docx. Retorna None se indisponivel."""
+    """Extrai texto de arquivo .docx usando python-docx.
+
+    Le paragrafos E tabelas EM ORDEM (iter no body) — tabelas sao comuns em
+    apresentacoes (ex.: precos do Licenciamento) e seriam perdidas se lessemos
+    apenas doc.paragraphs. A ordem importa para o split por idioma.
+    Retorna None se indisponivel.
+    """
     try:
         import docx  # python-docx
+        from docx.oxml.table import CT_Tbl
+        from docx.oxml.text.paragraph import CT_P
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+
         doc = docx.Document(str(path))
-        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-        return "\n\n".join(paragraphs) if paragraphs else None
+        parts: list[str] = []
+        for child in doc.element.body.iterchildren():
+            if isinstance(child, CT_P):
+                t = Paragraph(child, doc).text.strip()
+                if t:
+                    parts.append(t)
+            elif isinstance(child, CT_Tbl):
+                for row in Table(child, doc).rows:
+                    celulas = [c.text.strip() for c in row.cells if c.text.strip()]
+                    # dedup de celulas mescladas (row.cells repete merges)
+                    vistos: list[str] = []
+                    for c in celulas:
+                        if not vistos or vistos[-1] != c:
+                            vistos.append(c)
+                    if vistos:
+                        parts.append(" — ".join(vistos))
+        return "\n\n".join(parts) if parts else None
     except ImportError:
         logger.warning("seed: python-docx nao disponivel — apresentacoes .docx nao extraidas")
         return None

@@ -437,6 +437,30 @@ async def receive_webhook(
         return {"ack": "ok"}
 
     # -------------------------------------------------------------------------
+    # 5.ter Gate por fila: o agente SO atende na fila da IA (settings.ai_queue_id).
+    # Mensagens de outra fila (ex.: 78 = atendimento humano) sao ignoradas — o humano
+    # atende no mesmo numero, sem interferencia. Decisoes: fila ausente → processa
+    # (compat); #reset (acima) funciona fora da fila; ao devolver o ticket a fila da
+    # IA, o agente retoma automaticamente.
+    # -------------------------------------------------------------------------
+    fila_atual = payload.queueId
+    if fila_atual is None and payload.ticketData:
+        fila_atual = payload.ticketData.queueId
+    if (
+        settings.ai_queue_id is not None
+        and fila_atual is not None
+        and fila_atual != settings.ai_queue_id
+    ):
+        logger.info(
+            "webhook: fila=%s != fila IA=%s chamado_id=%s — atendimento humano, "
+            "agente silencioso",
+            fila_atual,
+            settings.ai_queue_id,
+            payload.chamadoId,
+        )
+        return {"ack": "ok"}
+
+    # -------------------------------------------------------------------------
     # 6. Filtro de estado do ticket (FR-024): em_handoff/encerrado → nop
     # Pre-check com o status do payload (verificacao definitiva via DB em motor)
     # -------------------------------------------------------------------------

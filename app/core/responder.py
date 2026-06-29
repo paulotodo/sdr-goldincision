@@ -116,46 +116,10 @@ condições, contratos ou valores: isso é tratado pelo especialista humano. Qua
 não tiver mais dúvidas, convide-o para a reunião com um especialista.
 """
 
-_SYSTEM_CAMINHO_3 = """
-CAMINHO ATIVO: Sistema GoldIncision (Licenciamento / Franquia)
-Importante: a técnica GoldIncision NÃO é um curso avulso — é um sistema de licenciamento.
-Qualificar o interesse (licenciamento ou franquia) e conduzir para reunião de apresentação.
-NUNCA tente "vender" ou fechar diretamente — o objetivo é marcar a reunião.
-"""
-
-_SYSTEM_CAMINHO_4 = """
-CAMINHO ATIVO: Aluno Precisa de Suporte
-O lead é aluno e precisa de suporte (acesso, certificado, pagamento ou dúvidas).
-Coletar a necessidade e encaminhar para a equipe responsável.
-"""
-
-_SYSTEM_CAMINHO_5 = """
-CAMINHO ATIVO: Paciente Modelo
-O lead quer realizar o procedimento, não fazer o curso.
-Instrução: fornecer APENAS o contato da Nídia: +55 21 97423-9844
-Não responda sobre vagas, seleção, critérios ou procedimentos. APENAS o contato.
-"""
-
-_SYSTEM_CAMINHO_6 = """
-CAMINHO ATIVO: Outro Assunto
-O assunto não se encaixa nos demais caminhos.
-Agradecer e encaminhar para a equipe. NUNCA inventar informações fora da base.
-"""
-
-_SYSTEM_MENU = """
-SITUAÇÃO: Intenção do lead não está clara.
-Apresente o menu de opções de forma cordial.
-"""
-
-_CAMINHO_PROMPTS = {
-    1: _SYSTEM_CAMINHO_1,
-    2: _SYSTEM_CAMINHO_2,
-    3: _SYSTEM_CAMINHO_3,
-    4: _SYSTEM_CAMINHO_4,
-    5: _SYSTEM_CAMINHO_5,
-    6: _SYSTEM_CAMINHO_6,
-    0: _SYSTEM_MENU,  # 0 = menu
-}
+# Os caminhos 3-6 (Sistema, Aluno, Paciente, Outro) sao tratados de forma
+# DETERMINISTICA pelo FlowEngine (textos fixos / handoff) e nunca chamam o LLM;
+# por isso nao ha prompt de sistema para eles aqui. O responder.generate so e
+# acionado nas fases de DUVIDAS, sempre despachado por SLUG.
 
 # Dispatch por SLUG (corrige o bug de colisao de indices numericos): os sub-cursos
 # presenciais e o licenciamento usam prompts dedicados, e NAO os caminhos 2/3/4.
@@ -186,7 +150,7 @@ class GroundedResponder:
     async def generate(
         self,
         user_message: str,
-        caminho: "int | str",
+        caminho: str,
         etapa: str,
         knowledge_context: str,
         session_history: Optional[list[dict]] = None,
@@ -211,13 +175,9 @@ class GroundedResponder:
             - handoff_necessario: True se o marcador HANDOFF_NECESSARIO apareceu
         """
         idioma_nome = _IDIOMA_NOMES.get(idioma, "Português")
-        # Resolve o prompt por SLUG (string) quando informado — corrige a colisao de
-        # indices numericos (sub-cursos presenciais nao herdam mais C3/C4). Para
-        # caminhos numericos, usa o mapa por caminho.
-        if isinstance(caminho, str):
-            caminho_prompt = _SLUG_PROMPTS.get(caminho, _SYSTEM_CAMINHO_2)
-        else:
-            caminho_prompt = _CAMINHO_PROMPTS.get(caminho, _SYSTEM_MENU)
+        # Resolve o prompt por SLUG (corrige a colisao de indices numericos: os
+        # sub-cursos presenciais nao herdam mais os prompts de C3/C4).
+        caminho_prompt = _SLUG_PROMPTS.get(caminho, _SYSTEM_CAMINHO_2)
 
         # Sistema: instrucoes + caminho + grounding (nunca contaminado pelo usuario)
         system_content = (

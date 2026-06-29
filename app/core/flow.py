@@ -483,6 +483,83 @@ _T: dict[str, dict[str, str]] = {
             "puedan ayudarte con este tema de la mejor manera. 🙏"
         ),
     },
+    # Perguntas de qualificacao (texto fixo — anti-alucinacao)
+    "pergunta_medico": {
+        "pt": (
+            "Ótimo! Antes de prosseguirmos, preciso confirmar uma informação: você é "
+            "médico com registro profissional ativo em seu país? 🩺"
+        ),
+        "en": (
+            "Great! Before we proceed, I need to confirm one detail: are you a "
+            "physician with an active professional registration in your country? 🩺"
+        ),
+        "es": (
+            "¡Genial! Antes de continuar, necesito confirmar un detalle: ¿eres "
+            "médico con registro profesional activo en tu país? 🩺"
+        ),
+    },
+    "pergunta_experiencia": {
+        "pt": (
+            "Para indicar a formação mais adequada ao seu momento profissional: você "
+            "já atua com Harmonização Corporal ou preenchimento de glúteo? "
+            "(experiência apenas facial não conta) 💉"
+        ),
+        "en": (
+            "To indicate the most suitable training for your moment: do you already "
+            "work with Corporal Harmonization or gluteal fillers? "
+            "(facial experience alone does not count) 💉"
+        ),
+        "es": (
+            "Para indicarte la formación más adecuada a tu momento: ¿ya trabajas con "
+            "Armonización Corporal o rellenos glúteos? (la experiencia solo facial "
+            "no cuenta) 💉"
+        ),
+    },
+    "pergunta_especialidade": {
+        "pt": (
+            "Para indicar a formação mais adequada ao seu perfil, poderia me informar "
+            "sua especialidade médica?\n"
+            "• Dermatologia\n• Cirurgia Plástica\n• Cirurgia Vascular\n"
+            "• Outra especialidade\n• Não possuo especialidade"
+        ),
+        "en": (
+            "To direct you to the most suitable course, could you tell me your "
+            "medical specialty?\n"
+            "• Dermatology\n• Plastic Surgery\n• Vascular Surgery\n"
+            "• Other specialty\n• I don't have a specialty"
+        ),
+        "es": (
+            "Para dirigirte al curso más adecuado, ¿podrías decirme tu especialidad "
+            "médica?\n"
+            "• Dermatología\n• Cirugía Plástica\n• Cirugía Vascular\n"
+            "• Otra especialidad\n• No tengo especialidad"
+        ),
+    },
+    "pergunta_turma": {
+        "pt": (
+            "Atualmente temos duas turmas disponíveis do HG360. Qual delas desperta "
+            "mais o seu interesse?\n\n"
+            "1️⃣ São Paulo – 28 a 30/08/2026\n"
+            "2️⃣ Barcelona – 24 e 25/07/2026"
+        ),
+        "en": (
+            "We currently have two HG360 sessions available. Which one interests you "
+            "most?\n\n"
+            "1️⃣ São Paulo – August 28-30, 2026\n"
+            "2️⃣ Barcelona – July 24-25, 2026"
+        ),
+        "es": (
+            "Actualmente tenemos dos grupos del HG360 disponibles. ¿Cuál te interesa "
+            "más?\n\n"
+            "1️⃣ São Paulo – 28 a 30/08/2026\n"
+            "2️⃣ Barcelona – 24 y 25/07/2026"
+        ),
+    },
+    "trilha_conector": {
+        "pt": "👉 E, como trilha de evolução recomendada, veja também o HG360:",
+        "en": "👉 And, as the recommended learning path, here is the HG360 too:",
+        "es": "👉 Y, como ruta de evolución recomendada, mira también el HG360:",
+    },
 }
 
 
@@ -1221,12 +1298,7 @@ class FlowEngine:
             if apres_mod1:
                 partes.append(apres_mod1)
             if apres_360:
-                conector = {
-                    "pt": "👉 E, como trilha de evolução recomendada, veja também o HG360:",
-                    "en": "👉 And, as the recommended learning path, here is the HG360 too:",
-                    "es": "👉 Y, como ruta de evolución recomendada, mira también el HG360:",
-                }.get(idioma, "")
-                partes.append(conector + "\n\n" + apres_360)
+                partes.append(_t("trilha_conector", idioma) + "\n\n" + apres_360)
             partes.append(_t("invite_duvidas", idioma))
             texto = "\n\n".join(p for p in partes if p).strip()
         else:
@@ -1280,40 +1352,43 @@ class FlowEngine:
             return ""
         return await self._load_knowledge_by_slug(slug=slug, idioma=idioma)
 
+    async def _get_curso(self, slug: str) -> Optional[Curso]:
+        """Busca o Curso ativo pelo slug (ponto unico de acesso — DRY)."""
+        stmt = select(Curso).where(Curso.slug == slug, Curso.ativo.is_(True))
+        return (await self._db.execute(stmt)).scalar_one_or_none()
+
+    async def _scalar_idioma(self, model, curso_id: int, idioma: str):
+        """SELECT escalar de `model` por (curso_id, idioma) com fallback PT."""
+        stmt = select(model).where(model.curso_id == curso_id, model.idioma == idioma)
+        row = (await self._db.execute(stmt)).scalar_one_or_none()
+        if row is None and idioma != "pt":
+            stmt = select(model).where(model.curso_id == curso_id, model.idioma == "pt")
+            row = (await self._db.execute(stmt)).scalar_one_or_none()
+        return row
+
+    async def _list_idioma(self, model, curso_id: int, idioma: str) -> list:
+        """SELECT em lista de `model` por (curso_id, idioma) com fallback PT."""
+        stmt = select(model).where(model.curso_id == curso_id, model.idioma == idioma)
+        itens = (await self._db.execute(stmt)).scalars().all()
+        if not itens and idioma != "pt":
+            stmt = select(model).where(model.curso_id == curso_id, model.idioma == "pt")
+            itens = (await self._db.execute(stmt)).scalars().all()
+        return list(itens)
+
     async def _load_apresentacao(self, slug: str, idioma: str) -> str:
         """Carrega APENAS a apresentacao oficial verbatim (fallback PT)."""
-        stmt_curso = select(Curso).where(Curso.slug == slug, Curso.ativo.is_(True))
-        curso = (await self._db.execute(stmt_curso)).scalar_one_or_none()
+        curso = await self._get_curso(slug)
         if curso is None:
             return ""
-        stmt = select(CursoApresentacao).where(
-            CursoApresentacao.curso_id == curso.id,
-            CursoApresentacao.idioma == idioma,
-        )
-        apres = (await self._db.execute(stmt)).scalar_one_or_none()
-        if apres is None and idioma != "pt":
-            stmt_pt = select(CursoApresentacao).where(
-                CursoApresentacao.curso_id == curso.id,
-                CursoApresentacao.idioma == "pt",
-            )
-            apres = (await self._db.execute(stmt_pt)).scalar_one_or_none()
+        apres = await self._scalar_idioma(CursoApresentacao, curso.id, idioma)
         return apres.texto if apres else ""
 
     async def _load_curso_link(self, slug: str, idioma: str) -> Optional[str]:
         """Carrega o link de inscricao do curso no idioma (fallback PT)."""
-        stmt_curso = select(Curso).where(Curso.slug == slug, Curso.ativo.is_(True))
-        curso = (await self._db.execute(stmt_curso)).scalar_one_or_none()
+        curso = await self._get_curso(slug)
         if curso is None:
             return None
-        stmt = select(CursoLink).where(
-            CursoLink.curso_id == curso.id, CursoLink.idioma == idioma,
-        )
-        link = (await self._db.execute(stmt)).scalar_one_or_none()
-        if link is None and idioma != "pt":
-            stmt_pt = select(CursoLink).where(
-                CursoLink.curso_id == curso.id, CursoLink.idioma == "pt",
-            )
-            link = (await self._db.execute(stmt_pt)).scalar_one_or_none()
+        link = await self._scalar_idioma(CursoLink, curso.id, idioma)
         return link.url if link else None
 
     async def _load_knowledge_by_slug(self, slug: str, idioma: str) -> str:
@@ -1321,42 +1396,18 @@ class FlowEngine:
         Carrega base de conhecimento do banco para o slug e idioma.
         Hierarquia: Apresentacao + Objecoes (por idioma) + Turmas + Links + FAQ.
         """
-        stmt_curso = select(Curso).where(Curso.slug == slug, Curso.ativo.is_(True))
-        result = await self._db.execute(stmt_curso)
-        curso = result.scalar_one_or_none()
+        curso = await self._get_curso(slug)
         if curso is None:
             logger.warning("flow: curso nao encontrado slug=%s", slug)
             return ""
 
         sections: list[str] = []
 
-        stmt_apres = select(CursoApresentacao).where(
-            CursoApresentacao.curso_id == curso.id,
-            CursoApresentacao.idioma == idioma,
-        )
-        result = await self._db.execute(stmt_apres)
-        apres = result.scalar_one_or_none()
-        if apres is None and idioma != "pt":
-            stmt_apres_pt = select(CursoApresentacao).where(
-                CursoApresentacao.curso_id == curso.id,
-                CursoApresentacao.idioma == "pt",
-            )
-            result = await self._db.execute(stmt_apres_pt)
-            apres = result.scalar_one_or_none()
+        apres = await self._scalar_idioma(CursoApresentacao, curso.id, idioma)
         if apres:
             sections.append(f"=== APRESENTACAO OFICIAL ({idioma}) ===\n{apres.texto}")
 
-        stmt_obj = select(CursoObjecao).where(
-            CursoObjecao.curso_id == curso.id, CursoObjecao.idioma == idioma,
-        )
-        result = await self._db.execute(stmt_obj)
-        objecoes = result.scalars().all()
-        if not objecoes and idioma != "pt":
-            stmt_obj_pt = select(CursoObjecao).where(
-                CursoObjecao.curso_id == curso.id, CursoObjecao.idioma == "pt",
-            )
-            result = await self._db.execute(stmt_obj_pt)
-            objecoes = result.scalars().all()
+        objecoes = await self._list_idioma(CursoObjecao, curso.id, idioma)
         if objecoes:
             obj_text = "\n".join(
                 f"- Objecao: {o.objecao}\n  Resposta: {o.resposta}" for o in objecoes
@@ -1366,8 +1417,7 @@ class FlowEngine:
         stmt_turmas = select(CursoTurma).where(
             CursoTurma.curso_id == curso.id, CursoTurma.ativo.is_(True),
         )
-        result = await self._db.execute(stmt_turmas)
-        turmas = result.scalars().all()
+        turmas = (await self._db.execute(stmt_turmas)).scalars().all()
         if turmas:
             turmas_text = "\n".join(
                 f"- {t.cidade} ({t.pais or ''}): {t.data_inicio or 'data a confirmar'}"
@@ -1376,17 +1426,7 @@ class FlowEngine:
             )
             sections.append(f"=== TURMAS DISPONIVEIS ===\n{turmas_text}")
 
-        stmt_links = select(CursoLink).where(
-            CursoLink.curso_id == curso.id, CursoLink.idioma == idioma,
-        )
-        result = await self._db.execute(stmt_links)
-        link = result.scalar_one_or_none()
-        if link is None and idioma != "pt":
-            stmt_links_pt = select(CursoLink).where(
-                CursoLink.curso_id == curso.id, CursoLink.idioma == "pt",
-            )
-            result = await self._db.execute(stmt_links_pt)
-            link = result.scalar_one_or_none()
+        link = await self._scalar_idioma(CursoLink, curso.id, idioma)
         if link:
             sections.append(f"=== LINK DE INSCRICAO ({idioma}) ===\n{link.url}")
 
@@ -1416,83 +1456,16 @@ class FlowEngine:
     # ------------------------------------------------------------------
 
     async def _gerar_pergunta_medico(self, idioma: str) -> str:
-        if idioma == "en":
-            return (
-                "Great! Before we proceed, I need to confirm one detail: are you a "
-                "physician with an active professional registration in your country? 🩺"
-            )
-        elif idioma == "es":
-            return (
-                "¡Genial! Antes de continuar, necesito confirmar un detalle: ¿eres "
-                "médico con registro profesional activo en tu país? 🩺"
-            )
-        return (
-            "Ótimo! Antes de prosseguirmos, preciso confirmar uma informação: você é "
-            "médico com registro profissional ativo em seu país? 🩺"
-        )
+        return _t("pergunta_medico", idioma)
 
     async def _gerar_pergunta_experiencia(self, idioma: str) -> str:
-        if idioma == "en":
-            return (
-                "To indicate the most suitable training for your moment: do you "
-                "already work with Corporal Harmonization or gluteal fillers? "
-                "(facial experience alone does not count) 💉"
-            )
-        elif idioma == "es":
-            return (
-                "Para indicarte la formación más adecuada a tu momento: ¿ya trabajas "
-                "con Armonización Corporal o rellenos glúteos? (la experiencia solo "
-                "facial no cuenta) 💉"
-            )
-        return (
-            "Para indicar a formação mais adequada ao seu momento profissional: você "
-            "já atua com Harmonização Corporal ou preenchimento de glúteo? "
-            "(experiência apenas facial não conta) 💉"
-        )
+        return _t("pergunta_experiencia", idioma)
 
     async def _gerar_pergunta_especialidade(self, idioma: str) -> str:
-        if idioma == "en":
-            return (
-                "To direct you to the most suitable course, could you tell me your "
-                "medical specialty?\n"
-                "• Dermatology\n• Plastic Surgery\n• Vascular Surgery\n"
-                "• Other specialty\n• I don't have a specialty"
-            )
-        elif idioma == "es":
-            return (
-                "Para dirigirte al curso más adecuado, ¿podrías decirme tu "
-                "especialidad médica?\n"
-                "• Dermatología\n• Cirugía Plástica\n• Cirugía Vascular\n"
-                "• Otra especialidad\n• No tengo especialidad"
-            )
-        return (
-            "Para indicar a formação mais adequada ao seu perfil, poderia me informar "
-            "sua especialidade médica?\n"
-            "• Dermatologia\n• Cirurgia Plástica\n• Cirurgia Vascular\n"
-            "• Outra especialidade\n• Não possuo especialidade"
-        )
+        return _t("pergunta_especialidade", idioma)
 
     async def _gerar_pergunta_escolha_turma(self, idioma: str) -> str:
-        if idioma == "en":
-            return (
-                "We currently have two HG360 sessions available. Which one interests "
-                "you most?\n\n"
-                "1️⃣ São Paulo – August 28-30, 2026\n"
-                "2️⃣ Barcelona – July 24-25, 2026"
-            )
-        elif idioma == "es":
-            return (
-                "Actualmente tenemos dos grupos del HG360 disponibles. ¿Cuál te "
-                "interesa más?\n\n"
-                "1️⃣ São Paulo – 28 a 30/08/2026\n"
-                "2️⃣ Barcelona – 24 y 25/07/2026"
-            )
-        return (
-            "Atualmente temos duas turmas disponíveis do HG360. Qual delas desperta "
-            "mais o seu interesse?\n\n"
-            "1️⃣ São Paulo – 28 a 30/08/2026\n"
-            "2️⃣ Barcelona – 24 e 25/07/2026"
-        )
+        return _t("pergunta_turma", idioma)
 
 
 # ---------------------------------------------------------------------------
@@ -1616,6 +1589,24 @@ def _detectar_especialidade(texto: str) -> Optional[str]:
     return None
 
 
+def _opcao_numerica(t: str, max_n: int = 6) -> Optional[int]:
+    """Numero de opcao de menu (1..max_n) como PALAVRA INTEIRA (evita casar 'sp'
+    em 'esperar' ou '1' em '10/2026'). Retorna o inteiro ou None."""
+    toks = set(t.replace("️⃣", " ").split())
+    mapa = {
+        1: {"1", "1.", "um", "one", "uno", "primeira", "primeiro"},
+        2: {"2", "2.", "dois", "two", "dos", "segunda", "segundo"},
+        3: {"3", "3.", "tres", "three"},
+        4: {"4", "4.", "quatro", "four", "cuatro"},
+        5: {"5", "5.", "cinco", "five"},
+        6: {"6", "6.", "seis", "six"},
+    }
+    for n in range(1, max_n + 1):
+        if toks & mapa[n]:
+            return n
+    return None
+
+
 def _detectar_escolha_turma(texto: str) -> Optional[str]:
     """Detecta escolha de turma HG360 (SP ou Barcelona). Retorna slug ou None."""
     t = _norm(texto)
@@ -1628,10 +1619,11 @@ def _detectar_escolha_turma(texto: str) -> Optional[str]:
     if "sao paulo" in t or {"sp", "sampa"} & toks or \
             {"brasil", "brazil"} & toks or any(k in t for k in ["agosto", "august"]):
         return _SLUG_HG360_SP
-    # Numeros do menu (palavras inteiras)
-    if toks & {"1", "1.", "um", "one", "uno", "primeira", "primeiro"}:
+    # Numeros do menu (1=SP, 2=Barcelona)
+    n = _opcao_numerica(t, 2)
+    if n == 1:
         return _SLUG_HG360_SP
-    if toks & {"2", "2.", "dois", "two", "dos", "segunda", "segundo"}:
+    if n == 2:
         return _SLUG_HG360_BARCELONA
     return None
 
@@ -1659,37 +1651,32 @@ def _detectar_objetivo_sistema(texto: str) -> Optional[str]:
         "not sure", "no estoy seguro", "ayuda a decidir",
     ]):
         return "nao_sei"
-    # Numeros do menu (palavras inteiras)
-    toks = set(t.replace("️⃣", " ").split())
-    if toks & {"1", "1.", "um", "one", "uno"}:
-        return "incorporar"
-    if toks & {"2", "2.", "dois", "two", "dos"}:
-        return "abrir"
-    if toks & {"3", "3.", "tres", "three"}:
-        return "nao_sei"
-    return None
+    # Numeros do menu (1=incorporar, 2=abrir, 3=nao_sei)
+    return {1: "incorporar", 2: "abrir", 3: "nao_sei"}.get(_opcao_numerica(t, 3))
 
 
 def _detectar_opcao_aluno(texto: str) -> Optional[str]:
     """Caminho 4 — submenu (6 opcoes). Retorna rotulo curto ou None."""
     t = _norm(texto)
-    mapa = [
-        (["1", "plataforma", "acesso", "acessar", "login", "platform"], "plataforma_acesso"),
-        (["2", "certificado", "certificate", "conclusao", "diploma"], "certificado"),
-        (["3", "suporte tecnico", "grupo", "tecnico", "support group"], "suporte_tecnico"),
-        (["4", "pagamento", "inscricao", "boleto", "pix", "payment", "pago"], "pagamento"),
-        (["5", "duvida", "duvidas", "sobre o curso", "conteudo", "question"], "duvidas_curso"),
-        (["6", "outro", "outra", "other", "otro"], "outro"),
+    # 1..6 → rotulo (mesma ordem do submenu apresentado)
+    rotulos = [
+        "plataforma_acesso", "certificado", "suporte_tecnico",
+        "pagamento", "duvidas_curso", "outro",
     ]
-    toks = set(t.replace("️⃣", " ").split())
-    for chaves, rotulo in mapa:
-        for k in chaves:
-            if k.isdigit():
-                if k in toks:
-                    return rotulo
-            elif k in t:
-                return rotulo
-    return None
+    # Palavras-chave por opcao (prioridade sobre o numero)
+    kw = [
+        (["plataforma", "acesso", "acessar", "login", "platform"], "plataforma_acesso"),
+        (["certificado", "certificate", "conclusao", "diploma"], "certificado"),
+        (["suporte tecnico", "grupo", "tecnico", "support group"], "suporte_tecnico"),
+        (["pagamento", "inscricao", "boleto", "pix", "payment", "pago"], "pagamento"),
+        (["duvida", "duvidas", "sobre o curso", "conteudo", "question"], "duvidas_curso"),
+        (["outro", "outra", "other", "otro"], "outro"),
+    ]
+    for chaves, rotulo in kw:
+        if any(k in t for k in chaves):
+            return rotulo
+    n = _opcao_numerica(t, 6)
+    return rotulos[n - 1] if n else None
 
 
 def _detectar_medico_investidor(texto: str) -> Optional[str]:

@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # Mapa opcional destino-logico -> queueId, como JSON. Ex.:
     #   {"consultores": 78, "presencial": 80, "licenciamento": 81}
     handoff_queue_ids_json: str = ""
+    # Fila da IA: o agente SO atende quando o ticket esta nesta fila (queueId).
+    # Mensagens vindas de outra fila (ex.: 78 = atendimento humano) sao ignoradas
+    # pelo agente — atendimento humano no mesmo numero, sem interferencia.
+    # Se None, o gate de fila e desativado (processa todas as filas).
+    ai_queue_id: Optional[int] = 77
 
     @property
     def handoff_queue_ids(self) -> dict[str, int]:
@@ -76,7 +81,7 @@ class Settings(BaseSettings):
     reset_command: str = "#reset"
     # CSV usado para SEMEAR a tabela numero_teste no startup; gerencia dinamica
     # via admin API (/admin/numeros-teste).
-    reset_test_numbers: str = "5511967296849,5511941410998"
+    reset_test_numbers: str = "5511967296849,5511941410998,555195953520"
 
     @property
     def reset_test_numbers_list(self) -> list[str]:

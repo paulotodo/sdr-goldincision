@@ -73,8 +73,9 @@ def _webhook_payload(
     ticket_status: str = "open",
     media_type: str = "text",
     media_url: Optional[str] = None,
+    queue_id: Optional[int] = 77,
 ) -> dict:
-    """Constroi payload de webhook sintetico."""
+    """Constroi payload de webhook sintetico (queue_id=77 = fila da IA por padrao)."""
     if media_type == "text":
         mensagem = [{"type": "text", "text": text}]
     else:
@@ -94,7 +95,7 @@ def _webhook_payload(
         "fromMe": from_me,
         "companyId": 1,
         "defaultWhatsapp_x": 127,
-        "queueId": 78,
+        "queueId": queue_id,
         "isGroup": is_group,
         "ticketData": {
             "id": chamado_id,
@@ -1252,3 +1253,71 @@ class TestF8WebhookEngineWired:
             "O webhook pode estar descartando a mensagem indevidamente."
         )
         assert process_calls[0]["chamado_id"] == 900097
+
+
+# ===========================================================================
+# Gate por fila — agente atende SO na fila da IA (settings.ai_queue_id=77)
+# ===========================================================================
+
+class TestGateDeFila:
+    """Mensagens da fila humana (78) sao ignoradas pelo agente; fila 77 atende."""
+
+    def _spy_post(self, payload):
+        from app.api import webhook as webhook_module
+
+        process_calls = []
+
+        async def spy_process(chamado_id, messages):
+            process_calls.append(chamado_id)
+
+        with (
+            patch("app.api.webhook._get_redis", return_value=None),
+            patch.object(webhook_module, "_process_consolidated_messages", spy_process),
+        ):
+            client = _make_client()
+            resp = _post_webhook(client, payload)
+        return resp, process_calls
+
+    def test_fila_humana_78_agente_silencioso(self):
+        """queueId=78 (humano) → ack 200 e NENHUM processamento do agente."""
+        resp, calls = self._spy_post(
+            _webhook_payload(chamado_id=900201, text="oi", queue_id=78)
+        )
+        assert resp.status_code == 200
+        assert calls == [], "agente nao deve processar mensagens da fila humana (78)"
+
+    def test_fila_ia_77_processa(self):
+        """queueId=77 (IA) → processa normalmente."""
+        resp, calls = self._spy_post(
+            _webhook_payload(chamado_id=900202, text="oi", queue_id=77)
+        )
+        assert resp.status_code == 200
+        assert len(calls) >= 1
+
+    def test_fila_ausente_processa_compat(self):
+        """queueId ausente → processa (compat, conforme decisao do operador)."""
+        resp, calls = self._spy_post(
+            _webhook_payload(chamado_id=900203, text="oi", queue_id=None)
+        )
+        assert resp.status_code == 200
+        assert len(calls) >= 1
+
+    def test_reset_funciona_fora_da_fila_ia(self):
+        """#reset roda mesmo na fila humana (esta antes do gate) — ferramenta de teste."""
+        from app.api import webhook as webhook_module
+
+        reset_calls = []
+
+        async def spy_reset(chamado_id, sender):
+            reset_calls.append(chamado_id)
+
+        with (
+            patch("app.api.webhook._get_redis", return_value=None),
+            patch.object(webhook_module, "_handle_reset", spy_reset),
+        ):
+            client = _make_client()
+            resp = _post_webhook(
+                client, _webhook_payload(chamado_id=900204, text="#reset", queue_id=78)
+            )
+        assert resp.status_code == 200
+        assert reset_calls == [900204], "#reset deve rodar mesmo fora da fila da IA"

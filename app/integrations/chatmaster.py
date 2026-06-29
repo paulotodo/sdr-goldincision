@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Optional
 
 import httpx
@@ -38,8 +39,13 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # Tamanho maximo de um bloco de texto (caracteres).
-# WhatsApp limita a 4096; usamos 3800 para margem.
+# WhatsApp limita a 4096; usamos 3800 como teto duro de seguranca.
 _MAX_BLOCK_CHARS = 3800
+
+# Alvo conversacional por mensagem: respostas longas sao fragmentadas em varias
+# mensagens curtas (UX de WhatsApp; Regra 13 "prefira respostas curtas").
+# Cada paragrafo vira uma mensagem; paragrafos acima deste alvo sao divididos por frase.
+_SOFT_BLOCK_CHARS = 400
 
 # Pausa entre blocos consecutivos (evitar reordenamento no WhatsApp).
 _INTER_BLOCK_DELAY = 0.4  # segundos
@@ -57,58 +63,75 @@ HANDOFF_QUEUE_ALLOWLIST: set[str] = {
 }
 
 
-def _split_into_blocks(text: str, max_chars: int = _MAX_BLOCK_CHARS) -> list[str]:
-    """
-    Divide texto em blocos curtos sem cortar palavras.
-
-    Estrategia:
-    1. Se cabe num bloco: retorna [text].
-    2. Tenta dividir em paragrafos (\n\n).
-    3. Faz fallback para divisao por frases ('. ', '! ', '? ').
-    4. Forca corte duro se nenhuma estrategia funcionar.
-
-    Apresentacoes verbatim (FR-010): nao reescreve o texto; apenas
-    fragmenta para respeitar o limite de tamanho.
-    """
-    if len(text) <= max_chars:
-        return [text]
-
-    blocks: list[str] = []
-    remaining = text
-
-    while len(remaining) > max_chars:
-        # Tentar quebrar em paragrafo
-        idx = remaining.rfind("\n\n", 0, max_chars)
-        if idx > max_chars // 4:
-            blocks.append(remaining[: idx + 2].rstrip())
-            remaining = remaining[idx + 2 :].lstrip()
-            continue
-
-        # Tentar quebrar em fim de frase
-        best = -1
-        for sep in (". ", "! ", "? ", ".\n", "!\n", "?\n"):
-            pos = remaining.rfind(sep, 0, max_chars)
-            if pos > best:
-                best = pos + len(sep)
-
-        if best > max_chars // 4:
-            blocks.append(remaining[:best].rstrip())
-            remaining = remaining[best:].lstrip()
-            continue
-
-        # Forca corte duro em espaco
-        idx = remaining.rfind(" ", 0, max_chars)
-        if idx > 0:
-            blocks.append(remaining[:idx].rstrip())
-            remaining = remaining[idx + 1 :]
+def _fragmentar_paragrafo(p: str, soft: int) -> list[str]:
+    """Divide um paragrafo longo por frases (agrupando ate `soft`); se uma frase
+    ainda exceder `soft`, corta em espacos. Nunca corta palavras."""
+    out: list[str] = []
+    buf = ""
+    for s in re.split(r"(?<=[.!?])\s+", p):
+        if len(s) > soft:
+            if buf:
+                out.append(buf)
+                buf = ""
+            while len(s) > soft:
+                cut = s.rfind(" ", 0, soft)
+                cut = cut if cut > 0 else soft
+                out.append(s[:cut].rstrip())
+                s = s[cut:].lstrip()
+            buf = s
+        elif not buf:
+            buf = s
+        elif len(buf) + 1 + len(s) <= soft:
+            buf = f"{buf} {s}"
         else:
-            blocks.append(remaining[:max_chars])
-            remaining = remaining[max_chars:]
+            out.append(buf)
+            buf = s
+    if buf:
+        out.append(buf)
+    return out
 
-    if remaining.strip():
-        blocks.append(remaining.strip())
 
-    return [b for b in blocks if b]
+def _split_into_blocks(
+    text: str,
+    max_chars: int = _MAX_BLOCK_CHARS,
+    soft_chars: int = _SOFT_BLOCK_CHARS,
+) -> list[str]:
+    """
+    Divide o texto em mensagens curtas e naturais, sem cortar palavras.
+
+    Estrategia (UX de WhatsApp):
+    1. Cada paragrafo (linhas em branco) vira uma mensagem — respostas longas com
+       varios paragrafos chegam como varias mensagens curtas.
+    2. Paragrafos acima de `soft_chars` sao fragmentados por frase/espaco.
+    3. Teto duro `max_chars` por seguranca do WhatsApp.
+
+    Linhas separadas por uma unica quebra (ex.: opcoes de um menu) permanecem juntas
+    na mesma mensagem. Apresentacoes verbatim (FR-010): o texto NAO e reescrito;
+    apenas entregue em varias mensagens preservando o conteudo.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    # 1-2. paragrafos → fragmentos <= soft (um paragrafo = uma mensagem)
+    chunks: list[str] = []
+    for p in (p.strip() for p in re.split(r"\n[ \t]*\n", text) if p.strip()):
+        if len(p) <= soft_chars:
+            chunks.append(p)
+        else:
+            chunks.extend(_fragmentar_paragrafo(p, soft_chars))
+
+    # 3. teto duro de seguranca
+    final: list[str] = []
+    for m in chunks:
+        while len(m) > max_chars:
+            cut = m.rfind(" ", 0, max_chars)
+            cut = cut if cut > 0 else max_chars
+            final.append(m[:cut].rstrip())
+            m = m[cut:].lstrip()
+        if m:
+            final.append(m)
+    return final
 
 
 class ChatMasterClient:

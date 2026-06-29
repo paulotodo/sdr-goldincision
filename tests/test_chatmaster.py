@@ -82,11 +82,34 @@ def test_split_preserves_content():
     assert joined.count("Palavra") == original.count("Palavra")
 
 
-def test_split_exactly_at_limit():
-    """Texto exatamente no limite nao e quebrado."""
+def test_split_blob_sem_quebras_respeita_teto():
+    """Blob longo sem espacos/paragrafos ainda e cortado em blocos <= teto duro."""
     text = "X" * 3800
     blocks = _split_into_blocks(text, max_chars=3800)
-    assert blocks == [text]
+    assert len(blocks) >= 2  # agora fragmenta (alvo conversacional)
+    assert all(len(b) <= 3800 for b in blocks)
+    assert "".join(blocks) == text  # conteudo preservado
+
+
+def test_split_resposta_longa_vira_varias_mensagens():
+    """Resposta longa (varios paragrafos) e fragmentada em mensagens curtas."""
+    paras = [("Frase de exemplo. " * 20).strip() for _ in range(4)]  # ~360 chars cada
+    text = "\n\n".join(paras)  # ~1450 chars
+    blocks = _split_into_blocks(text)
+    assert len(blocks) >= 2
+    # cada mensagem fica no alvo conversacional (com margem)
+    assert all(len(b) <= 600 + 50 for b in blocks)
+    assert "Frase de exemplo" in blocks[0]
+
+
+def test_split_menu_curto_fica_em_uma_mensagem():
+    """Bloco curto com varias linhas (ex.: menu) NAO e fragmentado linha a linha."""
+    menu = (
+        "Olá! Como posso ajudar?\n"
+        "1 Curso Online\n2 Presenciais\n3 Sistema\n4 Suporte\n5 Paciente\n6 Outro"
+    )
+    blocks = _split_into_blocks(menu)
+    assert blocks == [menu]
 
 
 # ---------------------------------------------------------------------------

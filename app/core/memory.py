@@ -65,6 +65,11 @@ class SessionContext:
     resumo_rolante: Optional[str] = None
     historico_recente: list[dict] = field(default_factory=list)
     sessao_id: Optional[int] = None
+    # Nome do lead (para humanizacao — "Dr(a). <nome>")
+    nome: Optional[str] = None
+    # Estado efemero do funil (JSON serializado em Contato.etapa_funil):
+    # contador de tentativas por etapa para evitar loops (sem migration).
+    etapa_funil: Optional[str] = None
 
 
 class MemoryManager:
@@ -168,6 +173,8 @@ class MemoryManager:
             resumo_rolante=sessao.resumo_rolante,
             historico_recente=historico_recente,
             sessao_id=sessao.id,
+            nome=contato.nome,
+            etapa_funil=contato.etapa_funil,
         )
 
         logger.debug(
@@ -282,13 +289,23 @@ class MemoryManager:
         ticket_id: int,
         caminho: Optional[int] = None,
         etapa: Optional[str] = None,
+        status: Optional[str] = None,
+        handoff_destino: Optional[str] = None,
+        handoff_motivo: Optional[str] = None,
     ) -> None:
-        """Atualiza caminho e etapa do Mapa Mestre no Ticket."""
+        """Atualiza caminho/etapa do Mapa Mestre e (opcionalmente) o estado de
+        handoff no Ticket (status, destino logico da fila e motivo)."""
         values: dict = {}
         if caminho is not None:
             values["caminho_atual"] = caminho
         if etapa is not None:
             values["etapa_mapa_mestre"] = etapa
+        if status is not None:
+            values["status"] = status
+        if handoff_destino is not None:
+            values["handoff_destino"] = handoff_destino
+        if handoff_motivo is not None:
+            values["handoff_motivo"] = handoff_motivo
         if not values:
             return
 

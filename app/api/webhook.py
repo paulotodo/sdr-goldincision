@@ -237,11 +237,16 @@ async def _handle_engine(
                 await memory_manager.update_qualification_variables(
                     context.contato_id, flow_result.updates
                 )
-                await memory_manager.update_ticket_state(
-                    context.ticket_id,
-                    caminho=flow_result.updates.get("caminho_atual"),
-                    etapa=flow_result.updates.get("etapa_mapa_mestre"),
-                )
+            # Persistir estado do ticket (caminho/etapa sempre; handoff quando aplicavel).
+            _is_handoff = flow_result.action == "handoff"
+            await memory_manager.update_ticket_state(
+                context.ticket_id,
+                caminho=flow_result.updates.get("caminho_atual"),
+                etapa=flow_result.updates.get("etapa_mapa_mestre"),
+                status="em_handoff" if _is_handoff else None,
+                handoff_destino=flow_result.handoff_destino if _is_handoff else None,
+                handoff_motivo=flow_result.handoff_motivo if _is_handoff else None,
+            )
 
             # ---------------------------------------------------------------
             # 5. Persistir mensagens (inbound + outbound) na memoria
@@ -271,9 +276,12 @@ async def _handle_engine(
                         )
                         if flow_result.action == "handoff":
                             try:
+                                # Destino LOGICO vem do fluxo (allowlist/config resolve
+                                # o queueId; nunca do LLM — SEC-LLM-3). Fallback seguro.
+                                destino = flow_result.handoff_destino or "consultores"
                                 await cm_client.transfer_ticket(
                                     chamado_id=chamado_id,
-                                    destination="consultores",
+                                    destination=destino,
                                 )
                             except Exception as exc_handoff:
                                 logger.warning(

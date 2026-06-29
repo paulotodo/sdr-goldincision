@@ -1,5 +1,7 @@
 # SDR WhatsApp — Consultor Virtual Oficial GoldIncision
 
+[![CI](https://github.com/paulotodo/sdr-goldincision/actions/workflows/ci.yml/badge.svg)](https://github.com/paulotodo/sdr-goldincision/actions/workflows/ci.yml)
+
 Agente SDR consultivo para WhatsApp baseado no Mapa Mestre de Atendimento da
 GoldIncision. Recebe webhooks do ChatMaster via n8n (overlay interna Docker),
 conduz o lead pelos 6 caminhos do Mapa Mestre com anti-alucinacao rigida,

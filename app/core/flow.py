@@ -839,6 +839,25 @@ class FlowEngine:
                 destino=DEST_CONSULTORES, motivo="pedido_humano",
             )
 
+        # 2.bis Menu — escolha da opcao de forma DETERMINISTICA (numero ou palavra:
+        #    "3", "3️⃣", "tres") tem prioridade sobre o classificador LLM. Um numero
+        #    seco no menu nao deve depender da intencao (que o rebaixa a "ambigua" e
+        #    prende o lead no menu). Resolve o relato: digitar "3" nao entrava no C3.
+        if context.caminho is None and context.etapa == ETAPA_MENU:
+            opcao = _opcao_numerica(user_message, 6)
+            if opcao is not None:
+                logger.info(
+                    "flow: opcao de menu detectada=%s ticket_id=%s", opcao, ticket_id
+                )
+                context.caminho = opcao
+                context.etapa = None
+                _tent_clear(context, updates)
+                updates["caminho_atual"] = opcao
+                updates["etapa_mapa_mestre"] = None
+                return await self._despachar_caminho(
+                    context, user_message, updates, opcao
+                )
+
         # 3. Troca de caminho conservadora (Regra 10, mas sem reiniciar a jornada
         #    enquanto aguardamos a resposta de uma pergunta — fix #9).
         novo_caminho = INTENCAO_PARA_CAMINHO.get(intencao)
@@ -881,6 +900,15 @@ class FlowEngine:
             return FlowResult(menu_text, "continue", None, ETAPA_MENU, updates)
 
         # 6. Despacho por caminho
+        return await self._despachar_caminho(
+            context, user_message, updates, caminho_ativo
+        )
+
+    async def _despachar_caminho(
+        self, context: SessionContext, user_message: str, updates: dict,
+        caminho_ativo: Optional[int],
+    ) -> FlowResult:
+        """Despacha para o handler do caminho ativo (pode vir do contexto ou da intencao)."""
         if caminho_ativo == CaminhoMapaMestre.PACIENTE_MODELO:
             return await self._handle_paciente_modelo(context, updates)
         if caminho_ativo == CaminhoMapaMestre.ALUNO_SUPORTE:

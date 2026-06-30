@@ -94,6 +94,11 @@ copiado/divergente:
 **Critério:** nas dúvidas, o LLM cumprimenta usando o que sabe e não re-pergunta médico/
 especialidade já conhecidos.
 
+> **Status:** Fases 1-3 implementadas e em produção (tags 1.8.0). Fase 4 (opção 4a)
+> implementada na branch — coluna `Contato.perfil` JSONB + migration `d4b3c2a1f0e9`
+> + `_merge_perfil` + exposição no `_perfil_conhecido`; primeira captura ligada
+> (perfil médico/investidor da Franquia, C3). Aplica a migration no startup do deploy.
+
 ### Fase 4 — Perfil incremental e extensível (decisão de arquitetura)
 Para "características e preferências" além da qualificação fixa (ex.: "tem clínica própria",
 "prefere São Paulo", "foco estético vs. reconstrutivo", objeções recorrentes), duas opções:

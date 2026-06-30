@@ -398,7 +398,9 @@ async def receive_webhook(
             provided_query, expected
         )
         if not ok:
-            logger.warning(
+            # Chamada de origem nao autorizada / evento que nao consumimos: descartar
+            # silenciosamente (em debug, nao WARNING — e esperado e nao acionavel).
+            logger.debug(
                 "webhook: token invalido (header/query) — descartando (sem retry trigger)"
             )
             return {"ack": "ok"}  # 200 para nao triggar retry

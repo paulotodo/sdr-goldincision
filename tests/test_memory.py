@@ -260,6 +260,23 @@ async def test_update_qualification_variables_campos_validos():
 
 
 @pytest.mark.asyncio
+async def test_update_qualification_variables_aceita_perfil():
+    """O campo 'perfil' (JSONB livre/incremental) e aceito e persistido."""
+    redis = FakeRedisList()
+    executed = []
+
+    class FakeDB:
+        async def execute(self, stmt):
+            executed.append(stmt)
+
+    manager = MemoryManager(db_session=FakeDB(), redis_client=redis)
+    await manager.update_qualification_variables(
+        10, {"perfil": {"perfil_franquia": "investidor"}}
+    )
+    assert len(executed) == 1
+
+
+@pytest.mark.asyncio
 async def test_update_qualification_variables_vazio_nao_executa():
     """Updates vazios nao tocam no DB."""
     redis = FakeRedisList()

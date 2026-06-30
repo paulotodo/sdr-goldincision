@@ -70,6 +70,9 @@ class SessionContext:
     # Estado efemero do funil (JSON serializado em Contato.etapa_funil):
     # contador de tentativas por etapa para evitar loops (sem migration).
     etapa_funil: Optional[str] = None
+    # Perfil livre/incremental do lead (Contato.perfil — JSONB): caracteristicas e
+    # preferencias arbitrarias alem da qualificacao fixa, acumuladas entre tickets.
+    perfil: dict = field(default_factory=dict)
 
 
 class MemoryManager:
@@ -175,6 +178,7 @@ class MemoryManager:
             sessao_id=sessao.id,
             nome=contato.nome,
             etapa_funil=contato.etapa_funil,
+            perfil=dict(contato.perfil or {}),
         )
 
         logger.debug(
@@ -257,6 +261,8 @@ class MemoryManager:
         - experiencia_corporal: bool
         - produto_interesse: str
         - etapa_funil: str
+        - perfil: dict (perfil livre/incremental; grava o dict COMPLETO ja mesclado
+          pelo chamador — ver merge_perfil. Substitui o JSONB inteiro).
 
         Apenas campos presentes em `updates` sao modificados.
         """
@@ -266,7 +272,7 @@ class MemoryManager:
         # Filtrar apenas campos validos
         _allowed = {
             "idioma", "eh_medico", "especialidade",
-            "experiencia_corporal", "produto_interesse", "etapa_funil",
+            "experiencia_corporal", "produto_interesse", "etapa_funil", "perfil",
         }
         safe_updates = {k: v for k, v in updates.items() if k in _allowed}
         if not safe_updates:

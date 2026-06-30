@@ -676,12 +676,35 @@ def _perfil_conhecido(context: SessionContext) -> str:
         fatos.append("- Sem experiencia em Harmonizacao Corporal.")
     if context.produto_interesse:
         fatos.append(f"- Interesse/curso: {context.produto_interesse}")
+    # Perfil livre/incremental (caracteristicas e preferencias arbitrarias).
+    for chave, valor in (context.perfil or {}).items():
+        if valor is None or valor == "":
+            continue
+        rotulo = str(chave).replace("_", " ").capitalize()
+        fatos.append(f"- {rotulo}: {valor}")
     if not fatos:
         return ""
     return (
         "=== FATOS JA CONHECIDOS DO LEAD (use para personalizar; NAO pergunte "
         "novamente o que ja esta aqui) ===\n" + "\n".join(fatos)
     )
+
+
+def _merge_perfil(context: SessionContext, updates: dict, novos_fatos: dict) -> None:
+    """
+    Acumula caracteristicas/preferencias livres no perfil do lead (anti-redundancia).
+
+    Mescla `novos_fatos` em `context.perfil` (in-memory) e propaga o dict COMPLETO
+    em `updates["perfil"]` para persistencia (Contato.perfil — JSONB e gravado
+    inteiro). Valores None/"" sao ignorados; nao apaga fatos ja conhecidos.
+    """
+    limpos = {k: v for k, v in (novos_fatos or {}).items() if v is not None and v != ""}
+    if not limpos:
+        return
+    perfil = dict(context.perfil or {})
+    perfil.update(limpos)
+    context.perfil = perfil
+    updates["perfil"] = perfil
 
 
 # ---------------------------------------------------------------------------
@@ -1074,10 +1097,15 @@ class FlowEngine:
         if context.etapa == ETAPA_SISTEMA_FRANQUIA:
             # Conteudo de Franquia ainda nao existe na Base (ver Pendencias): encaminhar
             # a um especialista, sem inventar.
+            perfil_fr = _detectar_medico_investidor(user_message)
             logger.info(
                 "flow: sistema franquia perfil=%s contato_id=%s",
-                _detectar_medico_investidor(user_message), context.contato_id,
+                perfil_fr, context.contato_id,
             )
+            # Guardar o perfil declarado (medico/investidor) para reuso (anti-redundancia
+            # e contexto ao especialista no handoff).
+            if perfil_fr:
+                _merge_perfil(context, updates, {"perfil_franquia": perfil_fr})
             return self._handoff(
                 context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                 _t("sistema_franquia_handoff", idioma),

@@ -51,6 +51,7 @@ from app.core.flow import (
     _detectar_objetivo_sistema,
     _detectar_opcao_aluno,
     _eh_pergunta_informativa,
+    _merge_perfil,
     _pede_humano,
     _perfil_conhecido,
 )
@@ -574,6 +575,36 @@ def test_perfil_conhecido_vazio_quando_nada_sabido():
     """Sem fatos conhecidos (e sem nome), retorna string vazia."""
     ctx = make_context(nome=None)
     assert _perfil_conhecido(ctx) == ""
+
+
+def test_perfil_conhecido_inclui_perfil_livre():
+    """Caracteristicas livres do perfil tambem entram no bloco de fatos conhecidos."""
+    ctx = make_context(nome=None)
+    ctx.perfil = {"perfil_franquia": "investidor"}
+    bloco = _perfil_conhecido(ctx)
+    assert "Perfil franquia: investidor" in bloco
+
+
+def test_merge_perfil_acumula_e_propaga():
+    """_merge_perfil mescla in-memory, propaga o dict completo e ignora vazios."""
+    ctx = make_context(nome=None)
+    updates: dict = {}
+    _merge_perfil(ctx, updates, {"perfil_franquia": "investidor", "cidade": ""})
+    assert ctx.perfil == {"perfil_franquia": "investidor"}  # vazio ignorado
+    assert updates["perfil"] == {"perfil_franquia": "investidor"}
+    # Nao apaga o que ja sabemos: acrescenta nova chave.
+    _merge_perfil(ctx, updates, {"foco": "estetico"})
+    assert ctx.perfil == {"perfil_franquia": "investidor", "foco": "estetico"}
+
+
+@pytest.mark.asyncio
+async def test_c3_franquia_captura_perfil_no_lead():
+    """C3 Franquia: o perfil declarado (medico/investidor) e guardado no lead."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_FRANQUIA)
+    r = await eng.process(1, "sou investidor", ctx)
+    assert r.action == "handoff"
+    assert r.updates.get("perfil", {}).get("perfil_franquia") == "investidor"
 
 
 @pytest.mark.asyncio

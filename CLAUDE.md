@@ -4,6 +4,11 @@ Agente SDR consultivo para WhatsApp. Recebe webhooks do ChatMaster (via n8n),
 conduz o lead pelos **6 caminhos do Mapa Mestre** com anti-alucinação rígida e
 responde pela API oficial do ChatMaster.
 
+> **Localização do código**: o repositório vive em `/root/sdr-goldincision` (git
+> + CI). `/var/lib/gold_agente` contém apenas a cópia-fonte original de
+> `documentos_agente/` (origem dos docs canônicos em `knowledge_base/`); **não é**
+> o repositório. Se a sessão abrir em outro diretório, faça `cd /root/sdr-goldincision`.
+
 ## Fonte da verdade (ler ANTES de mexer em fluxo/textos)
 
 `knowledge_base/documentos_agente/`:
@@ -43,6 +48,12 @@ modelo (Nídia) · 6. Outro assunto.
 - `app/api/webhook.py` — orquestra: `process()` → persiste updates → envia via ChatMaster →
   `transfer_ticket(destination=...)` no handoff (destino lógico via `FlowResult.handoff_destino`).
 - Apresentações são enviadas **verbatim do DB** (determinístico), não pelo LLM.
+- `app/api/admin.py` — Admin API (Bearer `admin_token`) para gerir conteúdo **como
+  dado, sem redeploy**: CRUD de `/admin/cursos` (+ `apresentacoes/{idioma}` e
+  `links/{idioma}` verbatim) e allowlist `/admin/numeros-teste` (autoriza `#reset`).
+- `app/main.py` — no startup roda `alembic upgrade head` + seed idempotente do
+  catálogo (`app/seed.py`); base de conhecimento (cursos, FAQ i18n, licenciamento)
+  é semeada a partir de `knowledge_base/`.
 
 ## Convenções de código
 
@@ -54,7 +65,9 @@ modelo (Nídia) · 6. Outro assunto.
 
 ## Testes (obrigatório antes de qualquer mudança de fluxo)
 
-- `python3 -m pytest -q` — suíte **inteira verde** (atualmente 284).
+- `python3 -m pytest -q` — suíte **inteira verde** (atualmente ~320).
+- Rodar um único teste: `python3 -m pytest tests/test_flow.py::test_nome -q`.
+- Setup local: `pip install -e ".[dev]"` (Python 3.12).
 - Testes de fluxo usam o **`FlowEngine` REAL** via `StubFlowEngine` (stuba só I/O de DB).
   **Não** reintroduzir um mock que reimplemente `process()`.
 - Toda correção de bug de NLU/jornada deve vir com teste de regressão.

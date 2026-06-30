@@ -184,6 +184,32 @@ async def test_intencao_ambigua_retorna_menu():
 
 
 @pytest.mark.asyncio
+async def test_menu_opcao_numerica_roteia_mesmo_com_intent_ambigua():
+    """Digitar '3' no menu entra no C3 mesmo com o classificador retornando ambigua
+    (numero seco nao deve depender do LLM) — corrige o relato do operador."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)  # LLM nao ajuda
+    ctx = make_context(caminho=None, etapa=ETAPA_MENU)
+    r = await eng.process(1, "3", ctx)
+    assert r.caminho == CaminhoMapaMestre.SISTEMA_GOLDINCISION
+    assert r.etapa == ETAPA_SISTEMA_OBJETIVO
+
+
+@pytest.mark.asyncio
+async def test_menu_opcoes_numericas_roteiam_sem_llm():
+    """Os numeros 1/2/3 do menu entram no caminho correspondente, sem depender do LLM."""
+    esperado = {
+        "1": CaminhoMapaMestre.CURSO_ONLINE_HG,
+        "2": CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+        "3": CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+    }
+    for opcao, caminho in esperado.items():
+        eng = engine(ClassificacaoIntencao.AMBIGUA)
+        ctx = make_context(caminho=None, etapa=ETAPA_MENU)
+        r = await eng.process(1, opcao, ctx)
+        assert r.caminho == caminho, f"opcao {opcao} deveria rotear para {caminho}"
+
+
+@pytest.mark.asyncio
 async def test_pedido_humano_handoff_global():
     eng = engine(ClassificacaoIntencao.AMBIGUA)
     ctx = make_context(caminho=2, etapa=ETAPA_DUVIDAS, eh_medico=True)

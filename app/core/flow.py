@@ -355,6 +355,32 @@ _T: dict[str, dict[str, str]] = {
             "Voy a dirigir tu interés para que agenden una reunión. 😊"
         ),
     },
+    # Resumo curto do Licenciamento (C3): o objetivo e qualificar e conduzir a uma
+    # reuniao com especialista, NUNCA vender nem despejar a apresentacao inteira.
+    "sistema_lic_resumo": {
+        "pt": (
+            "O Licenciamento Internacional GoldIncision é um programa exclusivo para "
+            "médicos que querem levar o método para a sua região com todo o suporte da "
+            "nossa estrutura. Os detalhes completos — condições, formato e próximos "
+            "passos — são apresentados por um especialista em uma conversa dedicada. "
+            "Posso esclarecer suas dúvidas iniciais por aqui; o que gostaria de saber "
+            "primeiro? 😊"
+        ),
+        "en": (
+            "GoldIncision International Licensing is an exclusive program for physicians "
+            "who want to bring the method to their region with the full support of our "
+            "structure. The complete details — terms, format and next steps — are "
+            "presented by a specialist in a dedicated conversation. I can clear up your "
+            "initial questions here; what would you like to know first? 😊"
+        ),
+        "es": (
+            "El Licenciamiento Internacional GoldIncision es un programa exclusivo para "
+            "médicos que desean llevar el método a su región con todo el soporte de "
+            "nuestra estructura. Los detalles completos — condiciones, formato y "
+            "próximos pasos — los presenta un especialista en una conversación dedicada. "
+            "Puedo aclarar tus dudas iniciales por aquí; ¿qué te gustaría saber primero? 😊"
+        ),
+    },
     "sistema_reuniao_handoff": {
         "pt": (
             "Maravilha! O próximo passo é uma conversa com um de nossos especialistas, "
@@ -625,6 +651,60 @@ def _saudacao(context: SessionContext) -> str:
         primeiro = nome.split()[0]
         return f"Perfeito, {primeiro}!"
     return "Perfeito!"
+
+
+def _perfil_conhecido(context: SessionContext) -> str:
+    """
+    Bloco compacto com os fatos JA CONHECIDOS do lead (qualificacao duravel do
+    Contato), para o LLM personalizar e NAO re-perguntar (anti-redundancia).
+
+    Retorna "" quando nada e conhecido. O idioma ja e passado a parte ao responder,
+    por isso nao e repetido aqui.
+    """
+    fatos: list[str] = []
+    if (context.nome or "").strip():
+        fatos.append(f"- Nome: {context.nome.strip()}")
+    if context.eh_medico is True:
+        fatos.append("- Ja confirmou que e medico — NAO pergunte de novo se e medico.")
+    elif context.eh_medico is False:
+        fatos.append("- Ja informou que NAO e medico.")
+    if context.especialidade:
+        fatos.append(f"- Especialidade: {context.especialidade}")
+    if context.experiencia_corporal is True:
+        fatos.append("- Tem experiencia em Harmonizacao Corporal.")
+    elif context.experiencia_corporal is False:
+        fatos.append("- Sem experiencia em Harmonizacao Corporal.")
+    if context.produto_interesse:
+        fatos.append(f"- Interesse/curso: {context.produto_interesse}")
+    # Perfil livre/incremental (caracteristicas e preferencias arbitrarias).
+    for chave, valor in (context.perfil or {}).items():
+        if valor is None or valor == "":
+            continue
+        rotulo = str(chave).replace("_", " ").capitalize()
+        fatos.append(f"- {rotulo}: {valor}")
+    if not fatos:
+        return ""
+    return (
+        "=== FATOS JA CONHECIDOS DO LEAD (use para personalizar; NAO pergunte "
+        "novamente o que ja esta aqui) ===\n" + "\n".join(fatos)
+    )
+
+
+def _merge_perfil(context: SessionContext, updates: dict, novos_fatos: dict) -> None:
+    """
+    Acumula caracteristicas/preferencias livres no perfil do lead (anti-redundancia).
+
+    Mescla `novos_fatos` em `context.perfil` (in-memory) e propaga o dict COMPLETO
+    em `updates["perfil"]` para persistencia (Contato.perfil — JSONB e gravado
+    inteiro). Valores None/"" sao ignorados; nao apaga fatos ja conhecidos.
+    """
+    limpos = {k: v for k, v in (novos_fatos or {}).items() if v is not None and v != ""}
+    if not limpos:
+        return
+    perfil = dict(context.perfil or {})
+    perfil.update(limpos)
+    context.perfil = perfil
+    updates["perfil"] = perfil
 
 
 # ---------------------------------------------------------------------------
@@ -927,7 +1007,19 @@ class FlowEngine:
                 )
             _tent_clear(context, updates)
             if objetivo == "incorporar":
-                # Sub-caminho 1 → qualificar medico (Licenciamento)
+                # Sub-caminho 1 → Licenciamento. ANTI-REDUNDANCIA: nao re-perguntar se
+                # ja sabemos (a info e duravel e pode ter sido coletada em outro caminho,
+                # ex.: presencial). So perguntar quando eh_medico for desconhecido.
+                if context.eh_medico is True:
+                    return self._abrir_licenciamento_duvidas(context, updates)
+                if context.eh_medico is False:
+                    # Ja sabemos que nao e medico → Licenciamento e exclusivo; Franquia.
+                    return self._handoff(
+                        context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+                        _t("sistema_lic_naomedico", idioma),
+                        destino=DEST_FRANQUIA,
+                        motivo="licenciamento_nao_medico_oferece_franquia",
+                    )
                 updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO
                 pergunta = await self._gerar_pergunta_medico(
                     idioma, CaminhoMapaMestre.SISTEMA_GOLDINCISION
@@ -971,16 +1063,8 @@ class FlowEngine:
                     _t("sistema_lic_naomedico", idioma),
                     destino=DEST_FRANQUIA, motivo="licenciamento_nao_medico_oferece_franquia",
                 )
-            # Medico → apresentar Licenciamento (verbatim da Base) + abrir duvidas
-            apres = await self._load_apresentacao(_SLUG_LICENCIAMENTO, idioma)
-            leadin = f"{_saudacao(context)} 😊\n\n"
-            corpo = apres or ""
-            texto = (leadin + corpo + "\n\n" + _t("invite_duvidas", idioma)).strip()
-            updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
-            return FlowResult(
-                texto, "continue", CaminhoMapaMestre.SISTEMA_GOLDINCISION,
-                ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS, updates,
-            )
+            # Medico → abrir duvidas do Licenciamento com resumo objetivo.
+            return self._abrir_licenciamento_duvidas(context, updates)
 
         # Sub-caminho 1 — Licenciamento: fase de DUVIDAS
         if context.etapa == ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS:
@@ -1000,7 +1084,7 @@ class FlowEngine:
                 user_message=user_message, caminho=_SLUG_LICENCIAMENTO,
                 etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
                 session_history=history, session_summary=context.resumo_rolante,
-                idioma=idioma,
+                idioma=idioma, known_facts=_perfil_conhecido(context),
             )
             updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
             action = "handoff" if handoff else "continue"
@@ -1013,10 +1097,15 @@ class FlowEngine:
         if context.etapa == ETAPA_SISTEMA_FRANQUIA:
             # Conteudo de Franquia ainda nao existe na Base (ver Pendencias): encaminhar
             # a um especialista, sem inventar.
+            perfil_fr = _detectar_medico_investidor(user_message)
             logger.info(
                 "flow: sistema franquia perfil=%s contato_id=%s",
-                _detectar_medico_investidor(user_message), context.contato_id,
+                perfil_fr, context.contato_id,
             )
+            # Guardar o perfil declarado (medico/investidor) para reuso (anti-redundancia
+            # e contexto ao especialista no handoff).
+            if perfil_fr:
+                _merge_perfil(context, updates, {"perfil_franquia": perfil_fr})
             return self._handoff(
                 context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                 _t("sistema_franquia_handoff", idioma),
@@ -1036,6 +1125,26 @@ class FlowEngine:
         return FlowResult(
             _t("sistema_etapa1_2", idioma), "continue",
             CaminhoMapaMestre.SISTEMA_GOLDINCISION, ETAPA_SISTEMA_OBJETIVO, updates,
+        )
+
+    def _abrir_licenciamento_duvidas(
+        self, context: SessionContext, updates: dict
+    ) -> FlowResult:
+        """
+        Abre a fase de DUVIDAS do Licenciamento com um resumo objetivo (sem dump
+        verbatim da apresentacao). O objetivo do C3 e qualificar e conduzir a uma
+        reuniao com especialista (nunca vender).
+
+        Reusado tanto quando o lead acabou de confirmar que e medico quanto quando
+        ja sabiamos disso de outro caminho (anti-redundancia: nao re-perguntar).
+        """
+        idioma = context.idioma
+        leadin = f"{_saudacao(context)}\n\n"
+        texto = (leadin + _t("sistema_lic_resumo", idioma)).strip()
+        updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
+        return FlowResult(
+            texto, "continue", CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+            ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS, updates,
         )
 
     # ------------------------------------------------------------------
@@ -1160,7 +1269,7 @@ class FlowEngine:
             user_message=user_message, caminho="curso-online-hg",
             etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
             session_history=history, session_summary=context.resumo_rolante,
-            idioma=idioma,
+            idioma=idioma, known_facts=_perfil_conhecido(context),
         )
         updates["etapa_mapa_mestre"] = ETAPA_DUVIDAS
         action = "handoff" if handoff else "continue"
@@ -1376,7 +1485,7 @@ class FlowEngine:
             user_message=user_message, caminho=prompt_key,
             etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
             session_history=history, session_summary=context.resumo_rolante,
-            idioma=idioma,
+            idioma=idioma, known_facts=_perfil_conhecido(context),
         )
         updates["etapa_mapa_mestre"] = ETAPA_DUVIDAS
         action = "handoff" if handoff else "continue"

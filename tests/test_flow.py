@@ -51,7 +51,9 @@ from app.core.flow import (
     _detectar_objetivo_sistema,
     _detectar_opcao_aluno,
     _eh_pergunta_informativa,
+    _merge_perfil,
     _pede_humano,
+    _perfil_conhecido,
 )
 from app.core.intent import ClassificacaoIntencao, Idioma
 from app.core.memory import SessionContext
@@ -424,11 +426,16 @@ async def test_c3_incorporar_medico_apresenta_licenciamento_e_reuniao():
     r1 = await eng.process(1, "1", ctx)
     assert r1.etapa == ETAPA_SISTEMA_LICENCIAMENTO
 
-    # Confirma medico → apresenta licenciamento
+    # Confirma medico → abre duvidas com RESUMO curto (anti-rajada): NAO despeja a
+    # apresentacao verbatim longa; conduz a uma conversa com especialista.
     ctx.etapa = ETAPA_SISTEMA_LICENCIAMENTO
     r2 = await eng.process(1, "sim, sou médico", ctx)
     assert r2.etapa == ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
-    assert "APRES_LICENCIAMENTO" in r2.response_text
+    assert "APRES_LICENCIAMENTO" not in r2.response_text  # sem dump verbatim
+    assert "Licenciamento Internacional GoldIncision" in r2.response_text
+    assert "especialista" in r2.response_text.lower()
+    # Resposta objetiva: poucas frases (sem rajada de muitos blocos longos).
+    assert len(r2.response_text) < 700
 
     # Sem mais duvidas → convida reuniao (handoff)
     ctx.etapa = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
@@ -548,6 +555,82 @@ async def test_nao_repete_medico_ao_trocar_de_caminho():
     r = await eng.process(1, "na verdade quero o curso presencial", ctx)
     assert r.caminho == CaminhoMapaMestre.CURSOS_PRESENCIAIS
     assert r.etapa != ETAPA_QUALIF_MEDICO  # nao re-pergunta medico
+
+
+def test_perfil_conhecido_monta_fatos():
+    """_perfil_conhecido lista os fatos duraveis conhecidos do lead (anti-redundancia)."""
+    ctx = make_context(
+        eh_medico=True, especialidade="dermatologia",
+        experiencia_corporal=False, produto_interesse="hg360-sp", nome="Ana Souza",
+    )
+    bloco = _perfil_conhecido(ctx)
+    assert "FATOS JA CONHECIDOS DO LEAD" in bloco
+    assert "Ana Souza" in bloco
+    assert "e medico" in bloco.lower()
+    assert "dermatologia" in bloco
+    assert "hg360-sp" in bloco
+
+
+def test_perfil_conhecido_vazio_quando_nada_sabido():
+    """Sem fatos conhecidos (e sem nome), retorna string vazia."""
+    ctx = make_context(nome=None)
+    assert _perfil_conhecido(ctx) == ""
+
+
+def test_perfil_conhecido_inclui_perfil_livre():
+    """Caracteristicas livres do perfil tambem entram no bloco de fatos conhecidos."""
+    ctx = make_context(nome=None)
+    ctx.perfil = {"perfil_franquia": "investidor"}
+    bloco = _perfil_conhecido(ctx)
+    assert "Perfil franquia: investidor" in bloco
+
+
+def test_merge_perfil_acumula_e_propaga():
+    """_merge_perfil mescla in-memory, propaga o dict completo e ignora vazios."""
+    ctx = make_context(nome=None)
+    updates: dict = {}
+    _merge_perfil(ctx, updates, {"perfil_franquia": "investidor", "cidade": ""})
+    assert ctx.perfil == {"perfil_franquia": "investidor"}  # vazio ignorado
+    assert updates["perfil"] == {"perfil_franquia": "investidor"}
+    # Nao apaga o que ja sabemos: acrescenta nova chave.
+    _merge_perfil(ctx, updates, {"foco": "estetico"})
+    assert ctx.perfil == {"perfil_franquia": "investidor", "foco": "estetico"}
+
+
+@pytest.mark.asyncio
+async def test_c3_franquia_captura_perfil_no_lead():
+    """C3 Franquia: o perfil declarado (medico/investidor) e guardado no lead."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_FRANQUIA)
+    r = await eng.process(1, "sou investidor", ctx)
+    assert r.action == "handoff"
+    assert r.updates.get("perfil", {}).get("perfil_franquia") == "investidor"
+
+
+@pytest.mark.asyncio
+async def test_c3_ja_medico_nao_repergunta_abre_licenciamento():
+    """Lead que JA confirmou ser medico (outro caminho) entra no C3 'incorporar' →
+    abre direto o resumo do Licenciamento + duvidas, SEM re-perguntar medico."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO, eh_medico=True)
+    r = await eng.process(1, "1", ctx)  # objetivo "incorporar"
+    # Pula a etapa de pergunta (ETAPA_SISTEMA_LICENCIAMENTO) e vai direto as duvidas.
+    assert r.etapa == ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
+    assert "Licenciamento Internacional GoldIncision" in r.response_text
+    # Conteudo e o resumo (convite a esclarecer), nao a pergunta de qualificacao.
+    assert "o que gostaria de saber primeiro" in r.response_text.lower()
+
+
+@pytest.mark.asyncio
+async def test_c3_ja_nao_medico_vai_franquia_sem_repergunta():
+    """Lead que JA informou NAO ser medico entra no C3 'incorporar' → handoff
+    Franquia direto, sem re-perguntar."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO, eh_medico=False)
+    r = await eng.process(1, "1", ctx)  # objetivo "incorporar"
+    assert r.action == "handoff"
+    assert r.handoff_destino == "franquia"
+    assert r.etapa != ETAPA_SISTEMA_LICENCIAMENTO  # nao foi para a pergunta
 
 
 @pytest.mark.asyncio

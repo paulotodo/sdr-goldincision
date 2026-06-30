@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from typing import Optional
 
 import httpx
@@ -47,8 +48,78 @@ _MAX_BLOCK_CHARS = 3800
 # Cada paragrafo vira uma mensagem; paragrafos acima deste alvo sao divididos por frase.
 _SOFT_BLOCK_CHARS = 400
 
-# Pausa entre blocos consecutivos (evitar reordenamento no WhatsApp).
-_INTER_BLOCK_DELAY = 0.4  # segundos
+# Pausa default entre blocos consecutivos (evitar reordenamento no WhatsApp).
+# Configuravel por instancia (settings.inter_block_delay_seconds).
+_INTER_BLOCK_DELAY = 1.0  # segundos
+
+# Defaults de pacing/anti-rajada (sobrescreviveis por settings/env).
+_DEFAULT_MIN_INTERVAL_MS = 1000   # intervalo minimo entre envios (Meta/BSP)
+_DEFAULT_MAX_MSGS_PER_TURN = 4    # teto de mensagens por turno
+_DEFAULT_MAX_RETRIES = 3          # tentativas em 429/5xx (backoff 1s,2s,4s)
+
+# Convite curto usado quando o split excede o teto por turno: em vez de despejar
+# todos os blocos restantes, consolida num unico bloco com convite (anti-rajada).
+_OVERFLOW_NOTICE = {
+    "pt": (
+        "Tem bastante coisa para detalhar por aqui 😊 Posso continuar explicando o "
+        "restante ou te conectar com um especialista que apresenta tudo "
+        "pessoalmente — o que prefere?"
+    ),
+    "en": (
+        "There's quite a bit more to cover 😊 I can keep explaining the rest here "
+        "or connect you with a specialist who walks you through everything — which "
+        "do you prefer?"
+    ),
+    "es": (
+        "Hay bastante más para detallar 😊 Puedo seguir explicando el resto aquí o "
+        "conectarte con un especialista que te lo presenta todo — ¿qué prefieres?"
+    ),
+}
+
+
+def overflow_notice(idioma: str = "pt") -> str:
+    """Convite curto (anti-rajada) no idioma do lead (fallback PT)."""
+    return _OVERFLOW_NOTICE.get(idioma) or _OVERFLOW_NOTICE["pt"]
+
+
+class _Pacer:
+    """
+    Garante um intervalo minimo entre envios consecutivos, por destinatario e
+    global, respeitando o pacing/rate limit da WhatsApp Cloud API (Meta/BSP).
+
+    Usa relogio monotonico + lock async: chamadas concorrentes serializam a
+    espera, de modo que nunca dois envios partam mais proximos que o intervalo.
+    """
+
+    def __init__(self, min_interval_ms: int) -> None:
+        self._min_interval = max(0.0, min_interval_ms / 1000.0)
+        self._last_global = 0.0
+        self._last_by_number: dict[str, float] = {}
+        self._lock = asyncio.Lock()
+
+    async def wait(self, number: str) -> None:
+        if self._min_interval <= 0:
+            return
+        async with self._lock:
+            now = time.monotonic()
+            last = max(self._last_global, self._last_by_number.get(number, 0.0))
+            delay = self._min_interval - (now - last)
+            if delay > 0:
+                await asyncio.sleep(delay)
+                now = time.monotonic()
+            self._last_global = now
+            self._last_by_number[number] = now
+
+
+def _parse_retry_after(resp: httpx.Response) -> Optional[float]:
+    """Le o header Retry-After (segundos) quando presente e numerico."""
+    raw = resp.headers.get("Retry-After") if resp is not None else None
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
 
 # Allowlist de destinos validos para handoff (SEC-LLM-3).
 # Nunca aceitar destino como texto livre do LLM.
@@ -154,6 +225,10 @@ class ChatMasterClient:
         handoff_queue_ids: Optional[dict[str, int]] = None,
         default_queue_id: Optional[int] = None,
         timeout_seconds: float = 15.0,
+        min_interval_ms: int = _DEFAULT_MIN_INTERVAL_MS,
+        max_msgs_per_turn: int = _DEFAULT_MAX_MSGS_PER_TURN,
+        inter_block_delay_seconds: float = _INTER_BLOCK_DELAY,
+        max_retries: int = _DEFAULT_MAX_RETRIES,
     ):
         self._base_url = base_url.rstrip("/")
         self._token = token
@@ -162,6 +237,11 @@ class ChatMasterClient:
         self._default_queue_id = default_queue_id
         self._timeout = timeout_seconds
         self._client: Optional[httpx.AsyncClient] = None
+        # Pacing / anti-rajada (respeito ao rate limit da Meta/BSP).
+        self._max_msgs_per_turn = max(0, max_msgs_per_turn)
+        self._inter_block_delay = max(0.0, inter_block_delay_seconds)
+        self._max_retries = max(0, max_retries)
+        self._pacer = _Pacer(min_interval_ms)
 
     # ------------------------------------------------------------------
     # Ciclo de vida
@@ -189,7 +269,13 @@ class ChatMasterClient:
 
     async def send_message(self, number: str, text: str) -> None:
         """
-        Envia UM bloco de texto ao numero.
+        Envia UM bloco de texto ao numero, respeitando o pacing da Meta/BSP.
+
+        - Pacing: aguarda o intervalo minimo desde o ultimo envio (_Pacer).
+        - 429/5xx: retry com backoff exponencial (1s, 2s, 4s), honrando o header
+          `Retry-After` quando presente. Em falha persistente, aborta com log
+          (NAO levanta excecao — evitar floodar/derrubar o restante do turno).
+        - 4xx nao-429: falha rapido (raise_for_status).
 
         O chamador e responsavel por garantir que text <= _MAX_BLOCK_CHARS.
         Para mensagens longas, use send_message_blocks.
@@ -204,28 +290,76 @@ class ChatMasterClient:
             len(text),
         )
 
-        resp = await client.post(url, json=payload)
-        if resp.status_code >= 400:
+        for attempt in range(self._max_retries + 1):
+            await self._pacer.wait(number)
+            resp = await client.post(url, json=payload)
+            if resp.status_code < 400:
+                return
+
+            transient = resp.status_code == 429 or resp.status_code >= 500
+            if transient and attempt < self._max_retries:
+                retry_after = _parse_retry_after(resp)
+                backoff = retry_after if retry_after is not None else float(2 ** attempt)
+                logger.warning(
+                    "chatmaster: send_message status=%d (tentativa %d/%d) — "
+                    "backoff %.1fs%s",
+                    resp.status_code,
+                    attempt + 1,
+                    self._max_retries,
+                    backoff,
+                    " (Retry-After)" if retry_after is not None else "",
+                )
+                await asyncio.sleep(backoff)
+                continue
+
+            if transient:
+                # 429/5xx persistente: abortar sem floodar (NAO levanta excecao).
+                logger.error(
+                    "chatmaster: send_message status=%d persistente apos %d tentativas "
+                    "— abortando envio (sem flood)",
+                    resp.status_code,
+                    self._max_retries,
+                )
+                return
+
+            # 4xx nao-429: erro definitivo, falha rapido.
             logger.error(
                 "chatmaster: send_message falhou status=%d body=%s",
                 resp.status_code,
                 resp.text[:200],
             )
             resp.raise_for_status()
+            return
 
-    async def send_message_blocks(self, number: str, text: str) -> None:
+    async def send_message_blocks(
+        self, number: str, text: str, idioma: str = "pt"
+    ) -> None:
         """
-        Divide texto em blocos curtos e envia cada um em ordem.
+        Divide texto em blocos curtos e envia cada um em ordem, com pacing.
 
-        Uma pausa de _INTER_BLOCK_DELAY e inserida entre blocos para
-        preservar a ordem de entrega no WhatsApp.
+        Anti-rajada: nunca envia mais que `max_msgs_per_turn` mensagens por turno.
+        Se o split gerar mais blocos que o teto, envia os primeiros N-1 e consolida
+        o restante num unico bloco curto com convite (em vez de despejar todos).
+
+        Uma pausa de `inter_block_delay_seconds` e inserida entre blocos para
+        preservar a ordem de entrega no WhatsApp; o _Pacer garante o intervalo
+        minimo global da Meta/BSP.
         Apresentacoes verbatim (FR-010): texto nunca e reescrito, apenas fragmentado.
         """
         blocks = _split_into_blocks(text)
+        if not blocks:
+            return
+
+        cap = self._max_msgs_per_turn
+        if cap and len(blocks) > cap:
+            # Mantem os primeiros N-1 blocos e substitui o restante por um convite
+            # curto (anti-rajada). Nunca excede o teto por turno.
+            blocks = blocks[: cap - 1] + [overflow_notice(idioma)]
+
         for i, block in enumerate(blocks):
             await self.send_message(number, block)
-            if i < len(blocks) - 1:
-                await asyncio.sleep(_INTER_BLOCK_DELAY)
+            if i < len(blocks) - 1 and self._inter_block_delay > 0:
+                await asyncio.sleep(self._inter_block_delay)
 
     # ------------------------------------------------------------------
     # Handoff de ticket (FR-022/023/024)
@@ -318,6 +452,9 @@ def make_chatmaster_client(settings) -> ChatMasterClient:
     - settings.chatmaster_base_url  : base de envio/tickets (api2.chatmasterveloz.com)
     - settings.handoff_queue_ids    : mapa destino-logico -> queueId (config)
     - settings.handoff_queue_id_default : fila humana padrao (fallback)
+    - settings.whatsapp_min_interval_ms : intervalo minimo entre envios (pacing)
+    - settings.max_msgs_per_turn        : teto de mensagens por turno (anti-rajada)
+    - settings.inter_block_delay_seconds: pausa entre blocos consecutivos
     """
     queue_ids = getattr(settings, "handoff_queue_ids", {}) or {}
     default_qid = getattr(settings, "handoff_queue_id_default", None)
@@ -326,4 +463,13 @@ def make_chatmaster_client(settings) -> ChatMasterClient:
         token=settings.chatmaster_token,
         handoff_queue_ids=queue_ids,
         default_queue_id=default_qid,
+        min_interval_ms=getattr(
+            settings, "whatsapp_min_interval_ms", _DEFAULT_MIN_INTERVAL_MS
+        ),
+        max_msgs_per_turn=getattr(
+            settings, "max_msgs_per_turn", _DEFAULT_MAX_MSGS_PER_TURN
+        ),
+        inter_block_delay_seconds=getattr(
+            settings, "inter_block_delay_seconds", _INTER_BLOCK_DELAY
+        ),
     )

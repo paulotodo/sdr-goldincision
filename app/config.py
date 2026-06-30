@@ -100,6 +100,21 @@ class Settings(BaseSettings):
     max_requests_per_sender_per_minute: int = 30
     llm_max_tokens_per_hour: int = 500_000
 
+    # --- Pacing de envio (WhatsApp Cloud API via ChatMaster) ---
+    # Intervalo minimo entre envios consecutivos (por destinatario + global), em ms.
+    # Evita rajadas que ferem o rate limit/pacing da API oficial da Meta.
+    whatsapp_min_interval_ms: int = 1000
+    # Teto de mensagens enviadas por turno do bot (anti-rajada). Se o split gerar
+    # mais blocos que isso, os primeiros N-1 sao enviados e o restante e
+    # consolidado num unico bloco curto com convite (nunca despeja tudo).
+    max_msgs_per_turn: int = 4
+    # Pausa entre blocos consecutivos (segundos). Substitui a constante fixa de 0.4s.
+    inter_block_delay_seconds: float = 1.0
+
+    # --- Concisao das respostas geradas (responder) ---
+    # Limite de tokens da geracao de raciocinio: respostas objetivas e resumidas.
+    reasoning_max_tokens: int = 280
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v: str) -> str:

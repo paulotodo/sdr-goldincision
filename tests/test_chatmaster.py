@@ -19,29 +19,46 @@ import pytest
 from app.integrations.chatmaster import (
     HANDOFF_QUEUE_ALLOWLIST,
     ChatMasterClient,
+    _parse_retry_after,
     _split_into_blocks,
+    overflow_notice,
 )
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_client(token: str = "tok-test") -> ChatMasterClient:
+def _make_client(token: str = "tok-test", **kwargs) -> ChatMasterClient:
     # Mapeia todos os destinos logicos da allowlist para filas reais de exemplo,
     # com fila humana padrao de fallback (config do operador no deploy real).
+    # Por padrao desliga pacing/delays e o teto por turno para os testes que NAO
+    # exercitam anti-rajada (mantem-nos rapidos e deterministicos). Testes de
+    # pacing/cap/retry passam os valores relevantes via kwargs.
     queue_map = {dest: 70 + i for i, dest in enumerate(sorted(HANDOFF_QUEUE_ALLOWLIST))}
+    params = {
+        "min_interval_ms": 0,
+        "inter_block_delay_seconds": 0.0,
+        "max_msgs_per_turn": 0,  # 0 = sem teto (split integral)
+    }
+    params.update(kwargs)
     return ChatMasterClient(
         base_url="https://api2.chatmasterveloz.com",
         token=token,
         handoff_queue_ids=queue_map,
         default_queue_id=78,
+        **params,
     )
 
 
-def _mock_response(status_code: int = 200, json_body: dict | None = None) -> MagicMock:
+def _mock_response(
+    status_code: int = 200,
+    json_body: dict | None = None,
+    headers: dict | None = None,
+) -> MagicMock:
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = status_code
     resp.text = str(json_body or {})
+    resp.headers = headers or {}
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
         resp.raise_for_status.side_effect = httpx.HTTPStatusError(
@@ -376,3 +393,238 @@ async def test_apenas_uma_transferencia_por_handoff():
 
     assert len(chamadas_transfer) == 1, "Deve haver exatamente 1 transferencia"
     assert len(chamadas_send) == 0, "Nenhum envio apos handoff"
+
+
+# ---------------------------------------------------------------------------
+# Retry/backoff em 429/5xx (respeito ao rate limit da Meta)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_send_message_429_faz_retry_e_sucede():
+    """429 seguido de 200 → 1 retry e sucesso (sem excecao)."""
+    client = _make_client(max_retries=3)
+    respostas = [_mock_response(429), _mock_response(200)]
+
+    async def fake_post(url, **kwargs):
+        return respostas.pop(0)
+
+    mock_http = AsyncMock()
+    mock_http.post = fake_post
+    client._client = mock_http
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+
+    with patch("app.integrations.chatmaster.asyncio.sleep", fake_sleep):
+        await client.send_message("5511967296849", "ola")
+
+    assert respostas == [], "Deve ter consumido 429 e depois 200"
+    assert sleeps == [1.0], "1 backoff de 1s (base exponencial 2**0) antes do retry"
+
+
+@pytest.mark.asyncio
+async def test_send_message_429_honra_retry_after():
+    """Header Retry-After tem prioridade sobre o backoff exponencial."""
+    client = _make_client(max_retries=3)
+    respostas = [
+        _mock_response(429, headers={"Retry-After": "5"}),
+        _mock_response(200),
+    ]
+
+    async def fake_post(url, **kwargs):
+        return respostas.pop(0)
+
+    mock_http = AsyncMock()
+    mock_http.post = fake_post
+    client._client = mock_http
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+
+    with patch("app.integrations.chatmaster.asyncio.sleep", fake_sleep):
+        await client.send_message("5511967296849", "ola")
+
+    assert sleeps == [5.0], "Deve respeitar o Retry-After do header (5s)"
+
+
+@pytest.mark.asyncio
+async def test_send_message_429_persistente_aborta_sem_excecao():
+    """429 persistente → aborta apos N tentativas, com log, SEM levantar excecao."""
+    client = _make_client(max_retries=2)
+
+    calls = {"n": 0}
+
+    async def fake_post(url, **kwargs):
+        calls["n"] += 1
+        return _mock_response(429)
+
+    mock_http = AsyncMock()
+    mock_http.post = fake_post
+    client._client = mock_http
+
+    async def fake_sleep(s):
+        return None
+
+    with patch("app.integrations.chatmaster.asyncio.sleep", fake_sleep):
+        # NAO deve levantar: aborta com log para nao floodar/derrubar o turno.
+        await client.send_message("5511967296849", "ola")
+
+    # 1 tentativa inicial + 2 retries = 3 POSTs
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_send_message_4xx_nao_429_falha_rapido():
+    """4xx que nao seja 429 falha imediatamente (sem retry)."""
+    client = _make_client(max_retries=3)
+
+    calls = {"n": 0}
+
+    async def fake_post(url, **kwargs):
+        calls["n"] += 1
+        return _mock_response(400, {"error": "bad"})
+
+    mock_http = AsyncMock()
+    mock_http.post = fake_post
+    client._client = mock_http
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.send_message("5511000000000", "texto")
+    assert calls["n"] == 1, "4xx nao-429 nao faz retry"
+
+
+def test_parse_retry_after():
+    """_parse_retry_after le segundos numericos; ignora valores invalidos/ausentes."""
+    assert _parse_retry_after(_mock_response(429, headers={"Retry-After": "3"})) == 3.0
+    assert _parse_retry_after(_mock_response(429, headers={})) is None
+    assert _parse_retry_after(_mock_response(429, headers={"Retry-After": "abc"})) is None
+
+
+# ---------------------------------------------------------------------------
+# Cap por turno (anti-rajada)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_send_message_blocks_respeita_cap_por_turno():
+    """Texto que geraria muitos blocos → no maximo `max_msgs_per_turn` envios."""
+    client = _make_client(max_msgs_per_turn=4)
+    calls: list[str] = []
+
+    async def fake_post(url, **kwargs):
+        calls.append(kwargs["json"]["text"])
+        return _mock_response(200)
+
+    mock_http = AsyncMock()
+    mock_http.post = fake_post
+    client._client = mock_http
+
+    # 8 paragrafos → 8 blocos sem cap; com cap=4 deve enviar exatamente 4.
+    texto = "\n\n".join(f"Paragrafo numero {i} com algum conteudo." for i in range(8))
+    await client.send_message_blocks("5511967296849", texto)
+
+    assert len(calls) == 4, "Nunca deve exceder o teto por turno"
+    # O ultimo bloco consolida com o convite (anti-rajada), nao despeja o restante.
+    assert calls[-1] == overflow_notice("pt")
+
+
+@pytest.mark.asyncio
+async def test_send_message_blocks_overflow_no_idioma_do_lead():
+    """O convite de overflow respeita o idioma informado."""
+    client = _make_client(max_msgs_per_turn=2)
+    calls: list[str] = []
+
+    async def fake_post(url, **kwargs):
+        calls.append(kwargs["json"]["text"])
+        return _mock_response(200)
+
+    mock_http = AsyncMock()
+    mock_http.post = fake_post
+    client._client = mock_http
+
+    texto = "\n\n".join(f"Parrafo {i}." for i in range(6))
+    await client.send_message_blocks("5511967296849", texto, idioma="es")
+
+    assert len(calls) == 2
+    assert calls[-1] == overflow_notice("es")
+
+
+@pytest.mark.asyncio
+async def test_send_message_blocks_abaixo_do_cap_nao_consolida():
+    """Se o split ficar dentro do teto, envia todos os blocos sem convite extra."""
+    client = _make_client(max_msgs_per_turn=4)
+    calls: list[str] = []
+
+    async def fake_post(url, **kwargs):
+        calls.append(kwargs["json"]["text"])
+        return _mock_response(200)
+
+    mock_http = AsyncMock()
+    mock_http.post = fake_post
+    client._client = mock_http
+
+    texto = "\n\n".join(f"Paragrafo {i}." for i in range(3))
+    await client.send_message_blocks("5511967296849", texto)
+
+    assert len(calls) == 3
+    assert overflow_notice("pt") not in calls
+
+
+# ---------------------------------------------------------------------------
+# Pacing (intervalo minimo entre envios — respeito ao rate limit)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pacing_insere_intervalo_minimo_entre_envios():
+    """Envios consecutivos respeitam o intervalo minimo (sleep no _Pacer)."""
+    # min_interval 1000ms, sem delay inter-bloco para isolar o pacing.
+    client = _make_client(
+        min_interval_ms=1000, inter_block_delay_seconds=0.0, max_msgs_per_turn=0
+    )
+
+    async def fake_post(url, **kwargs):
+        return _mock_response(200)
+
+    mock_http = AsyncMock()
+    mock_http.post = fake_post
+    client._client = mock_http
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(s):
+        sleeps.append(s)  # nao avanca o relogio real → forca espera em cada envio
+
+    texto = "\n\n".join(f"Paragrafo {i}." for i in range(3))
+    with patch("app.integrations.chatmaster.asyncio.sleep", fake_sleep):
+        await client.send_message_blocks("5511967296849", texto)
+
+    # 3 envios: o 1o nao espera (sem envio anterior); os 2 seguintes aguardam ~1s.
+    pacing_sleeps = [s for s in sleeps if s > 0]
+    assert len(pacing_sleeps) >= 2
+    assert all(0 < s <= 1.0 for s in pacing_sleeps)
+
+
+@pytest.mark.asyncio
+async def test_pacing_desligado_nao_espera():
+    """min_interval_ms=0 desliga o pacing (nenhum sleep do _Pacer)."""
+    client = _make_client(min_interval_ms=0, inter_block_delay_seconds=0.0)
+
+    async def fake_post(url, **kwargs):
+        return _mock_response(200)
+
+    mock_http = AsyncMock()
+    mock_http.post = fake_post
+    client._client = mock_http
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+
+    with patch("app.integrations.chatmaster.asyncio.sleep", fake_sleep):
+        await client.send_message("5511967296849", "ola")
+
+    assert sleeps == [], "Sem pacing nem retry, nao deve dormir"

@@ -61,6 +61,12 @@ class Contato(Base):
     experiencia_corporal: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     produto_interesse: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     etapa_funil: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Perfil livre/incremental do lead (caracteristicas e preferencias arbitrarias
+    # alem da qualificacao fixa): dict JSON acumulado entre turnos/tickets. Usado
+    # para anti-redundancia (reusar o que ja sabemos) e personalizacao.
+    perfil: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}", default=dict
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -54,6 +54,7 @@ from app.core.flow import (
     _merge_perfil,
     _pede_humano,
     _perfil_conhecido,
+    _saudacao,
 )
 from app.core.intent import ClassificacaoIntencao, Idioma
 from app.core.memory import SessionContext
@@ -575,6 +576,26 @@ def test_perfil_conhecido_vazio_quando_nada_sabido():
     """Sem fatos conhecidos (e sem nome), retorna string vazia."""
     ctx = make_context(nome=None)
     assert _perfil_conhecido(ctx) == ""
+
+
+def test_saudacao_varia_por_turno_e_respeita_idioma():
+    """Abertura varia entre turnos (anti-repeticao) e respeita o idioma do lead."""
+    # Varia conforme o nº de mensagens ja trocadas (turnos diferentes → aberturas diferentes).
+    ctx = make_context(nome=None)
+    ctx.historico_recente = []
+    a = _saudacao(ctx)
+    ctx.historico_recente = [{"x": 1}]
+    b = _saudacao(ctx)
+    assert a != b, "Aberturas de turnos consecutivos nao devem ser iguais"
+    # Idioma-aware: jornada EN nao recebe abertura em PT.
+    ctx_en = make_context(idioma="en", nome=None)
+    ctx_en.historico_recente = []
+    assert _saudacao(ctx_en).rstrip("!") in {
+        "Perfect", "Great", "Wonderful", "Got it", "Excellent", "Sounds good",
+    }
+    # Inclui o nome quando disponivel.
+    ctx_nome = make_context(idioma="pt", nome="Ana Souza")
+    assert _saudacao(ctx_nome).endswith("Ana!")
 
 
 def test_perfil_conhecido_inclui_perfil_livre():

@@ -193,9 +193,9 @@ _T: dict[str, dict[str, str]] = {
         ),
     },
     "link_leadin": {
-        "pt": "Perfeito! Aqui está o link para realizar a sua inscrição:",
-        "en": "Perfect! Here is the link to complete your registration:",
-        "es": "¡Perfecto! Aquí está el enlace para realizar tu inscripción:",
+        "pt": "Ótimo! Aqui está o link para realizar a sua inscrição:",
+        "en": "Great! Here is the link to complete your registration:",
+        "es": "¡Genial! Aquí está el enlace para realizar tu inscripción:",
     },
     "link_pos": {
         "pt": "Qualquer dúvida no processo, é só me chamar. 😊",
@@ -204,15 +204,15 @@ _T: dict[str, dict[str, str]] = {
     },
     "consultor_handoff": {
         "pt": (
-            "Perfeito! Vou encaminhar o seu interesse para um de nossos consultores, "
+            "Combinado! Vou encaminhar o seu interesse para um de nossos consultores, "
             "que dará continuidade à sua inscrição. Em breve entrarão em contato. 😊"
         ),
         "en": (
-            "Perfect! I'll forward your interest to one of our consultants, who will "
+            "All set! I'll forward your interest to one of our consultants, who will "
             "continue your registration. They'll be in touch soon. 😊"
         ),
         "es": (
-            "¡Perfecto! Voy a dirigir tu interés a uno de nuestros consultores, que "
+            "¡Listo! Voy a dirigir tu interés a uno de nuestros consultores, que "
             "dará continuidad a tu inscripción. Te contactarán pronto. 😊"
         ),
     },
@@ -340,17 +340,17 @@ _T: dict[str, dict[str, str]] = {
     },
     "sistema_franquia_handoff": {
         "pt": (
-            "Perfeito! O modelo de Franquia GoldIncision é apresentado em detalhes "
+            "Excelente! O modelo de Franquia GoldIncision é apresentado em detalhes "
             "por um de nossos especialistas, que cuidará disso pessoalmente com você. "
             "Vou encaminhar o seu interesse para que agendem uma reunião. 😊"
         ),
         "en": (
-            "Perfect! The GoldIncision Franchise model is presented in detail by one "
+            "Excellent! The GoldIncision Franchise model is presented in detail by one "
             "of our specialists, who will handle this with you personally. I'll "
             "forward your interest so they can schedule a meeting. 😊"
         ),
         "es": (
-            "¡Perfecto! El modelo de Franquicia GoldIncision lo presenta en detalle "
+            "¡Excelente! El modelo de Franquicia GoldIncision lo presenta en detalle "
             "uno de nuestros especialistas, que lo atenderá personalmente contigo. "
             "Voy a dirigir tu interés para que agenden una reunión. 😊"
         ),
@@ -400,21 +400,21 @@ _T: dict[str, dict[str, str]] = {
     },
     "sistema_diagnostico": {
         "pt": (
-            "Perfeito, vamos entender juntos qual modelo faz mais sentido para você. "
+            "Vamos entender juntos qual modelo faz mais sentido para você. "
             "Me conte um pouco:\n"
             "• Você pretende usar uma clínica que já possui ou abrir uma nova unidade?\n"
             "• O projeto seria no Brasil ou no exterior?\n"
             "• Você é médico ou investidor?"
         ),
         "en": (
-            "Perfect, let's figure out together which model fits you best. Tell me a "
+            "Let's figure out together which model fits you best. Tell me a "
             "bit:\n"
             "• Do you intend to use a clinic you already own or open a new unit?\n"
             "• Would the project be in Brazil or abroad?\n"
             "• Are you a physician or an investor?"
         ),
         "es": (
-            "Perfecto, entendamos juntos qué modelo tiene más sentido para ti. "
+            "Entendamos juntos qué modelo tiene más sentido para ti. "
             "Cuéntame un poco:\n"
             "• ¿Piensas usar una clínica que ya tienes o abrir una nueva unidad?\n"
             "• ¿El proyecto sería en Brasil o en el exterior?\n"
@@ -476,20 +476,20 @@ _T: dict[str, dict[str, str]] = {
     },
     "aluno_encaminhamento": {
         "pt": (
-            "Perfeito! Vou encaminhar sua solicitação para nossa equipe responsável, "
+            "Pode deixar! Vou encaminhar sua solicitação para nossa equipe responsável, "
             "que dará continuidade ao seu atendimento.\n"
             "Caso seja necessário, nossa equipe poderá entrar em contato para "
             "solicitar informações complementares ou lhe chamar de outro número de "
             "WhatsApp. 😊"
         ),
         "en": (
-            "Perfect! I'll forward your request to our responsible team, who will "
+            "Will do! I'll forward your request to our responsible team, who will "
             "continue your service.\n"
             "If necessary, our team may contact you to request additional information "
             "or reach you from another WhatsApp number. 😊"
         ),
         "es": (
-            "¡Perfecto! Voy a dirigir tu solicitud a nuestro equipo responsable, que "
+            "¡Hecho! Voy a dirigir tu solicitud a nuestro equipo responsable, que "
             "dará continuidad a tu atención.\n"
             "Si es necesario, nuestro equipo podrá contactarte para solicitar "
             "información adicional o escribirte desde otro número de WhatsApp. 😊"
@@ -644,13 +644,29 @@ def _t(key: str, idioma: str) -> str:
     return bloco.get(idioma) or bloco.get("pt", "")
 
 
+# Aberturas curtas e VARIADAS por idioma (evita repetir "Perfeito" a cada resposta).
+_ACKS = {
+    "pt": ["Perfeito", "Ótimo", "Que bom", "Combinado", "Maravilha", "Excelente"],
+    "en": ["Perfect", "Great", "Wonderful", "Got it", "Excellent", "Sounds good"],
+    "es": ["Perfecto", "Genial", "Estupendo", "De acuerdo", "Maravilloso", "Excelente"],
+}
+
+
 def _saudacao(context: SessionContext) -> str:
-    """Saudacao curta com o nome do lead, quando disponivel (humanizacao)."""
+    """
+    Abertura curta, VARIADA e no idioma do lead (humanizacao sem repeticao).
+
+    Alterna o termo a cada turno (indice derivado do nº de mensagens ja trocadas),
+    para nao iniciar toda resposta com a mesma palavra. Inclui o nome quando
+    disponivel. Idioma-aware (antes retornava sempre PT, ate em jornadas EN/ES).
+    """
+    pool = _ACKS.get(context.idioma, _ACKS["pt"])
+    idx = len(context.historico_recente or []) % len(pool)
+    ack = pool[idx]
     nome = (context.nome or "").strip()
     if nome:
-        primeiro = nome.split()[0]
-        return f"Perfeito, {primeiro}!"
-    return "Perfeito!"
+        return f"{ack}, {nome.split()[0]}!"
+    return f"{ack}!"
 
 
 def _perfil_conhecido(context: SessionContext) -> str:

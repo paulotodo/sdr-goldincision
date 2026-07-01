@@ -186,10 +186,10 @@ Ref: FR-024
 
 Ref: `plan.md` Envs novos; FR-015, FR-009 (timeout)
 
-- [ ] 5.1.1 Adicionar `slot_confidence_threshold: float` (default `0.6`) em `app/config.py`
-- [ ] 5.1.2 Adicionar `verify_timeout_seconds: int` (default `3`) em `app/config.py`
-- [ ] 5.1.3 Adicionar as duas envs em `stack.yml` e `.env.example`, seguindo padrão já existente (sem hardcode, sem secrets)
-- [ ] 5.1.4 Escrever teste de config validando defaults + override via env, seguindo o padrão das tasks 1.1.4/1.1.5 da Onda 1
+- [x] 5.1.1 Adicionar `slot_confidence_threshold: float` (default `0.6`) em `app/config.py` (FASE 3, task 3.2.1)
+- [x] 5.1.2 Adicionar `verify_timeout_seconds: int` (default `3`) em `app/config.py` (FASE 2, task 2.2.1)
+- [x] 5.1.3 Adicionar as duas envs em `stack.yml` e `.env.example`, seguindo padrão já existente (sem hardcode, sem secrets)
+- [x] 5.1.4 Escrever teste de config validando defaults + override via env, seguindo o padrão das tasks 1.1.4/1.1.5 da Onda 1 (`tests/test_config.py`)
 
 ---
 

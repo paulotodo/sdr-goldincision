@@ -285,6 +285,7 @@ def log_turno(
     confianca_slot: Optional[float] = None,
     fidelidade_fiel: Optional[bool] = None,
     fidelidade_afirmacoes_nao_sustentadas: Optional[list[str]] = None,
+    fonte_ids: Optional[list[str]] = None,
 ) -> None:
     """
     Registra evento estruturado de observabilidade de turno (US5, FR-015,
@@ -329,6 +330,12 @@ def log_turno(
       OMITIDO do evento e substituido por
       `fidelidade_n_afirmacoes_nao_sustentadas` (apenas a contagem, sempre
       seguro).
+    - `fonte_ids` (Onda 3, FASE 5, US4/FR-018): lista de ids de `chunk`
+      (`HybridRetriever`) que embasaram a resposta deste turno — ids
+      determinados pelo orquestrador (`GroundedResponder.last_fonte_ids`),
+      nunca reportados pelo LLM. None quando RAG nao foi acionado neste
+      turno (fast-path/verbatim/sem duvida). Aditivo: nao contem texto
+      livre, apenas ids — sem necessidade de scrubbing.
     """
     if acao not in _TURNO_ACOES:
         logger.warning("log_turno: acao desconhecida %r (aceitas: %s)", acao, sorted(_TURNO_ACOES))
@@ -367,6 +374,10 @@ def log_turno(
             event["fidelidade_afirmacoes_nao_sustentadas"] = redigidas
         else:
             event["fidelidade_n_afirmacoes_nao_sustentadas"] = contagem
+    if fonte_ids is not None:
+        # Onda 3 (FASE 5, US4/FR-018): apenas ids (sem texto livre), aditivo,
+        # junto do veredito de fidelidade (mesmo caminho aditivo acima).
+        event["fonte_ids"] = fonte_ids
 
     _emit(event)
 

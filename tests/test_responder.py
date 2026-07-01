@@ -471,3 +471,97 @@ async def test_generate_verbatim_nunca_passa_pelo_portao():
     assert "5511999999999" in paciente
     gate._client.chat_cheap_json.assert_not_awaited()
     client.chat_reasoning_json.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# last_fonte_ids — rastreabilidade aditiva (Onda 3, FASE 5, task 5.2.3,
+# FR-011, FR-012, data-model.md §3)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_last_fonte_ids_populado_a_partir_dos_chunks_recuperados():
+    """`chunks_recuperados` populam `last_fonte_ids` DETERMINISTICAMENTE a
+    partir de `chunk.id` — nunca reportado pelo LLM (FR-011)."""
+    from app.core.retrieval import ChunkRecuperado
+
+    client = _make_openai_mock()
+    responder = GroundedResponder(openai_client=client)
+    chunks = [
+        ChunkRecuperado(chunk_id=7, conteudo="Objecao X", tipo="objecao", score_combinado=0.9),
+        ChunkRecuperado(chunk_id=12, conteudo="FAQ Y", tipo="faq", score_combinado=0.7),
+    ]
+
+    await responder.generate(
+        user_message="tem desconto?",
+        caminho="hg360-sp",
+        etapa="duvidas",
+        knowledge_context="Objecao X\n\nFAQ Y",
+        idioma="pt",
+        chunks_recuperados=chunks,
+    )
+
+    assert responder.last_fonte_ids == ["7", "12"]
+
+
+@pytest.mark.asyncio
+async def test_last_fonte_ids_none_quando_sem_chunks():
+    """Chamador sem RAG (verbatim/legado) -> `chunks_recuperados=None`
+    (default) -> `last_fonte_ids=None`."""
+    client = _make_openai_mock()
+    responder = GroundedResponder(openai_client=client)
+
+    await responder.generate(
+        user_message="qual a duracao?",
+        caminho="hg360-sp",
+        etapa="duvidas",
+        knowledge_context="Curso de 3 dias.",
+        idioma="pt",
+    )
+
+    assert responder.last_fonte_ids is None
+
+
+@pytest.mark.asyncio
+async def test_last_fonte_ids_none_quando_lista_vazia():
+    """Lista vazia de chunks recuperados (ex.: apenas verbatim, sem RAG
+    nesta chamada) tambem produz `last_fonte_ids=None` (nao `[]`)."""
+    client = _make_openai_mock()
+    responder = GroundedResponder(openai_client=client)
+
+    await responder.generate(
+        user_message="oi",
+        caminho="hg360-sp",
+        etapa="duvidas",
+        knowledge_context="Base.",
+        idioma="pt",
+        chunks_recuperados=[],
+    )
+
+    assert responder.last_fonte_ids is None
+
+
+@pytest.mark.asyncio
+async def test_last_fonte_ids_populado_mesmo_quando_fidelity_gate_reprova():
+    """`last_fonte_ids` reflete o que foi INJETADO no prompt deste turno —
+    populado ANTES da chamada ao LLM, independente do Portao de Fidelidade
+    aprovar/reprovar a resposta gerada (FR-012, data-model.md §3)."""
+    from app.core.retrieval import ChunkRecuperado
+
+    client = _make_openai_mock(
+        _pacote_json(texto="Sim, oferecemos parcelamento especial.")
+    )
+    gate = _make_fidelity_gate(fiel=False, afirmacoes=["condicao inventada"])
+    responder = GroundedResponder(openai_client=client, fidelity_gate=gate)
+    chunks = [ChunkRecuperado(chunk_id=3, conteudo="Objecao Z", tipo="objecao", score_combinado=0.8)]
+
+    texto, handoff = await responder.generate(
+        user_message="tem parcelamento especial?",
+        caminho="hg360-sp",
+        etapa="duvidas",
+        knowledge_context="Objecao Z",
+        idioma="pt",
+        chunks_recuperados=chunks,
+    )
+
+    assert handoff is True
+    assert responder.last_fonte_ids == ["3"]

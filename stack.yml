@@ -89,6 +89,17 @@ services:
       # Interpretacao Agentica / Slot-Filling (Pilar 8): limiar minimo de
       # confianca para aceitar um slot extraido pelo fallback agentico.
       SLOT_CONFIDENCE_THRESHOLD: "${SLOT_CONFIDENCE_THRESHOLD:-0.6}"
+      # RAG Hibrido (Onda 3): recuperacao ancorada com abstencao. Pre-condicao
+      # de infraestrutura: imagem pgvector/pgvector:pg16 no servico postgres
+      # (ver secao "Pre-condicao de merge/deploy" no PR) — ate la, o mecanismo
+      # opera em modo tolerante (abstencao/nao-fatal), nunca quebra o boot.
+      RAG_EMBEDDING_MODEL: "${RAG_EMBEDDING_MODEL:-text-embedding-3-small}"
+      RAG_LIMIAR_ABSTENCAO: "${RAG_LIMIAR_ABSTENCAO:-0.45}"
+      RAG_K_VETORIAL: "${RAG_K_VETORIAL:-20}"
+      RAG_K_TEXTUAL: "${RAG_K_TEXTUAL:-20}"
+      RAG_TOP_K: "${RAG_TOP_K:-5}"
+      RAG_RETRIEVAL_TIMEOUT_SECONDS: "${RAG_RETRIEVAL_TIMEOUT_SECONDS:-3.0}"
+      RAG_CACHE_ENABLED: "${RAG_CACHE_ENABLED:-false}"
     deploy:
       replicas: 1
       restart_policy:
@@ -130,8 +141,17 @@ services:
   # --------------------------------------------------------------------------
   # PostgreSQL — persistencia duravel (contatos, historico, catalogo)
   # --------------------------------------------------------------------------
+  # RAG Hibrido (Onda 3, dec-013, FR-024-INFRA-PRECONDITION): imagem trocada de
+  # postgres:16-alpine para pgvector/pgvector:pg16 (mesma base PG16, volume
+  # sdr-whatsapp_postgres_data compativel — sem perda de dados) para habilitar
+  # `CREATE EXTENSION vector` (tabela chunk/embeddings). Ate o OPERADOR
+  # redeployar SOMENTE este servico (sdr-whatsapp_postgres) na janela de
+  # infraestrutura dele, o app continua rodando normalmente contra a imagem
+  # antiga em producao (Alembic/rag_seed sao nao-fatais — research.md
+  # Decision 0/6): a feature simplesmente abstem-se sempre nas duvidas ate o
+  # swap ser aplicado. Ver secao "Pre-condicao de merge/deploy" do PR.
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     networks:
       - sdr-internal        # isolado — nao exposto ao Traefik nem ao n8n
     volumes:

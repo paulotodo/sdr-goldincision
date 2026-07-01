@@ -77,3 +77,50 @@ def test_slot_confidence_threshold_override_via_env(monkeypatch):
     monkeypatch.setenv("SLOT_CONFIDENCE_THRESHOLD", "0.75")
     s = Settings()
     assert s.slot_confidence_threshold == 0.75
+
+
+def test_rag_config_defaults():
+    """RAG Hibrido (Onda 3, FASE 7, task 7.1.1/7.1.3) — defaults documentados
+    em data-model.md §4 (mesmos usados por HybridRetriever, FASE 4)."""
+    s = Settings()
+    assert s.rag_embedding_model == "text-embedding-3-small"
+    assert s.rag_limiar_abstencao == 0.45
+    assert s.rag_k_vetorial == 20
+    assert s.rag_k_textual == 20
+    assert s.rag_top_k == 5
+    assert s.rag_retrieval_timeout_seconds == 3.0
+    assert s.rag_cache_enabled is False
+
+
+def test_rag_config_override_via_env(monkeypatch):
+    """Os 7 envs novos sao overridaveis (pydantic-settings env-driven, sem
+    hardcode — FR-020)."""
+    monkeypatch.setenv("RAG_EMBEDDING_MODEL", "text-embedding-3-large")
+    monkeypatch.setenv("RAG_LIMIAR_ABSTENCAO", "0.6")
+    monkeypatch.setenv("RAG_K_VETORIAL", "30")
+    monkeypatch.setenv("RAG_K_TEXTUAL", "15")
+    monkeypatch.setenv("RAG_TOP_K", "8")
+    monkeypatch.setenv("RAG_RETRIEVAL_TIMEOUT_SECONDS", "5.5")
+    monkeypatch.setenv("RAG_CACHE_ENABLED", "true")
+
+    s = Settings()
+
+    assert s.rag_embedding_model == "text-embedding-3-large"
+    assert s.rag_limiar_abstencao == 0.6
+    assert s.rag_k_vetorial == 30
+    assert s.rag_k_textual == 15
+    assert s.rag_top_k == 8
+    assert s.rag_retrieval_timeout_seconds == 5.5
+    assert s.rag_cache_enabled is True
+
+
+def test_rag_config_types():
+    """Tipos dos 7 campos novos (data-model.md §4): nunca str crua."""
+    s = Settings()
+    assert isinstance(s.rag_embedding_model, str)
+    assert isinstance(s.rag_limiar_abstencao, float)
+    assert isinstance(s.rag_k_vetorial, int)
+    assert isinstance(s.rag_k_textual, int)
+    assert isinstance(s.rag_top_k, int)
+    assert isinstance(s.rag_retrieval_timeout_seconds, float)
+    assert isinstance(s.rag_cache_enabled, bool)

@@ -25,7 +25,7 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import pytest
 
@@ -79,7 +79,16 @@ class _GoldenResponder:
         self.generate_calls: list[dict] = []
 
     async def generate(self, user_message, caminho, etapa, knowledge_context, **kwargs):
-        self.generate_calls.append({"caminho": caminho, "etapa": etapa})
+        # FASE 9 (Onda 3, task 9.1): registra tambem knowledge_context/
+        # chunks_recuperados para os casos golden de groundedness/abstencao
+        # RAG poderem inspecionar o que foi de fato injetado no prompt.
+        chunks = kwargs.get("chunks_recuperados") or []
+        self.generate_calls.append({
+            "caminho": caminho,
+            "etapa": etapa,
+            "knowledge_context": knowledge_context,
+            "chunks_recuperados_ids": [c.chunk_id for c in chunks],
+        })
         return self._texto, self._handoff
 
     async def generate_menu(self, idioma: str = "pt") -> str:
@@ -95,7 +104,9 @@ class _GoldenResponder:
 class _GoldenStubEngine(FlowEngine):
     """FlowEngine REAL com leitura da Base stubada (sem Postgres)."""
 
-    def __init__(self, intent, responder, *, apres=None, link=None, knowledge="BASE") -> None:
+    def __init__(
+        self, intent, responder, *, apres=None, link=None, knowledge="BASE", rag=None,
+    ) -> None:
         super().__init__(
             db_session=None,
             intent_classifier=intent,
@@ -108,6 +119,15 @@ class _GoldenStubEngine(FlowEngine):
         self._apres = apres or {}
         self._link = link or {}
         self._knowledge = knowledge
+        # rag (Onda 3, FASE 9, task 9.1): controla o `ResultadoRecuperacao`
+        # devolvido pelo HybridRetriever (stubado, sem Postgres real) para
+        # casos golden dedicados de groundedness/abstencao RAG. Formato do
+        # campo `rag` do caso JSON: {"abster": bool, "motivo_abstencao": str,
+        # "chunks": [{"chunk_id": int, "conteudo": str, "tipo": str,
+        # "score_combinado": float}, ...]}. `None` (default) -> comportamento
+        # PRE-FASE9 (abster=False, sem chunks) — todos os casos legados
+        # permanecem inalterados.
+        self._resultado_rag = _build_resultado_rag(rag)
 
     async def _load_apresentacao(self, slug: str, idioma: str) -> str:
         val = self._apres.get(slug)
@@ -118,14 +138,41 @@ class _GoldenStubEngine(FlowEngine):
     async def _load_curso_link(self, slug: str, idioma: str):
         return self._link.get((slug, idioma)) or self._link.get((slug, "pt"))
 
-    async def _load_knowledge_by_slug(self, slug: str, idioma: str) -> str:
-        return self._knowledge
+    async def _load_knowledge_by_slug(self, slug: str, idioma: str, user_message: str = ""):
+        if self._resultado_rag.abster:
+            return "", self._resultado_rag
+        knowledge = self._knowledge
+        if self._resultado_rag.chunks:
+            chunks_text = "\n\n".join(c.conteudo for c in self._resultado_rag.chunks)
+            knowledge = f"{knowledge}\n\n=== BASE OFICIAL RECUPERADA ===\n{chunks_text}"
+        return knowledge, self._resultado_rag
 
-    async def _load_knowledge(self, caminho: int, idioma: str) -> str:
-        return self._knowledge
+    async def _load_knowledge(self, caminho: int, idioma: str, user_message: str = ""):
+        return await self._load_knowledge_by_slug(
+            slug="", idioma=idioma, user_message=user_message
+        )
 
     async def _load_faq(self, idioma: str) -> str:
         return ""
+
+
+def _build_resultado_rag(rag_cfg: Optional[dict]):
+    from app.core.retrieval import ChunkRecuperado, ResultadoRecuperacao
+
+    if not rag_cfg:
+        return ResultadoRecuperacao()
+    chunks = [
+        ChunkRecuperado(
+            chunk_id=c["chunk_id"], conteudo=c["conteudo"], tipo=c.get("tipo", "faq"),
+            score_combinado=c.get("score_combinado", 0.9),
+        )
+        for c in rag_cfg.get("chunks", [])
+    ]
+    return ResultadoRecuperacao(
+        chunks=chunks,
+        abster=bool(rag_cfg.get("abster", False)),
+        motivo_abstencao=rag_cfg.get("motivo_abstencao"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +250,7 @@ async def _rodar_caso(caso: dict) -> tuple[Any, SessionContext, list[str]]:
         apres=caso.get("apresentacoes") or {},
         link=_flatten_links(caso.get("links") or {}),
         knowledge=caso.get("knowledge", "BASE"),
+        rag=caso.get("rag"),
     )
     context = _build_context(estado_inicial)
     result = await engine.process(1, caso["mensagem"], context)
@@ -256,6 +304,28 @@ async def _rodar_caso(caso: dict) -> tuple[Any, SessionContext, list[str]]:
         obtido = _get_path(context, campo)
         if obtido != valor:
             falhas.append(f"nao_repetir_slot[{campo}]: esperado={valor!r} obtido={obtido!r}")
+
+    # FASE 9 (Onda 3, task 9.1) — casos golden dedicados de groundedness/
+    # abstencao RAG (research.md Decision 7): abster=True curto-circuita
+    # ANTES do LLM (generate() NUNCA chamado); recuperacao bem-sucedida
+    # ancora o knowledge_context passado a generate() no conteudo do chunk.
+    if esperado.get("rag_abster_sem_chamar_llm") is True and responder.generate_calls:
+        falhas.append(
+            "rag_abster_sem_chamar_llm violado: generate() foi chamado "
+            f"({len(responder.generate_calls)}x) apesar de abster=True"
+        )
+
+    for termo in esperado.get("knowledge_context_contains", []):
+        ultima = responder.generate_calls[-1] if responder.generate_calls else {}
+        if termo not in (ultima.get("knowledge_context") or ""):
+            falhas.append(f"knowledge_context_contains ausente: {termo!r}")
+
+    if "fonte_ids" in esperado:
+        ultima = responder.generate_calls[-1] if responder.generate_calls else {}
+        obtido_ids = [str(i) for i in ultima.get("chunks_recuperados_ids", [])]
+        esperado_ids = [str(i) for i in esperado["fonte_ids"]]
+        if obtido_ids != esperado_ids:
+            falhas.append(f"fonte_ids: esperado={esperado_ids!r} obtido={obtido_ids!r}")
 
     return result, context, falhas
 

@@ -258,6 +258,7 @@ async def _handle_engine(
     from app.core.interpret import SlotExtractor
     from app.core.memory import MemoryManager
     from app.core.responder import GroundedResponder
+    from app.core.retrieval import HybridRetriever, SqlAlchemyChunkRepository
     from app.integrations.chatmaster import make_chatmaster_client
     from app.integrations.openai_client import OpenAIClient
     from app.repository.models import Contato, Ticket
@@ -349,6 +350,20 @@ async def _handle_engine(
                 fidelity_gate=fidelity_gate,
             )
             slot_extractor = SlotExtractor(openai_client=openai_client)
+            # RAG hibrido (Onda 3, FASE 5/FASE 7 — FR-001..FR-006, FR-020):
+            # config via 7 envs novos (app/config.py Settings), sem hardcode.
+            chunk_repository = SqlAlchemyChunkRepository(db_session)
+            retriever = HybridRetriever(
+                chunk_repository=chunk_repository,
+                openai_client=openai_client,
+                limiar_abstencao=cfg.rag_limiar_abstencao,
+                k_vetorial=cfg.rag_k_vetorial,
+                k_textual=cfg.rag_k_textual,
+                top_k=cfg.rag_top_k,
+                timeout_seconds=cfg.rag_retrieval_timeout_seconds,
+                redis_client=_get_redis(),
+                cache_enabled=cfg.rag_cache_enabled,
+            )
             engine = FlowEngine(
                 db_session=db_session,
                 intent_classifier=intent_classifier,
@@ -356,6 +371,7 @@ async def _handle_engine(
                 responder=responder,
                 nidia_phone=cfg.nidia_phone or _NIDIA_DEFAULT,
                 slot_extractor=slot_extractor,
+                retriever=retriever,
             )
 
             # Carregar contexto da sessao (DB + Redis)
@@ -424,6 +440,9 @@ async def _handle_engine(
             _turno_evt["fidelidade_afirmacoes_nao_sustentadas"] = (
                 flow_result.fidelidade_afirmacoes_nao_sustentadas
             )
+            # Rastreabilidade aditiva (Onda 3, FASE 5 — US4/FR-018): ids dos
+            # chunks recuperados (HybridRetriever) que embasaram a resposta.
+            _turno_evt["fonte_ids"] = flow_result.fonte_ids
 
             # ---------------------------------------------------------------
             # 4. Persistir atualizacoes de estado
@@ -537,6 +556,7 @@ async def _handle_engine(
                     fidelidade_afirmacoes_nao_sustentadas=_turno_evt.get(
                         "fidelidade_afirmacoes_nao_sustentadas"
                     ),
+                    fonte_ids=_turno_evt.get("fonte_ids"),
                 )
 
 

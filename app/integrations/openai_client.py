@@ -28,16 +28,24 @@ class OpenAIClient:
     Instancia unica (singleton) com key da config.
     """
 
-    def __init__(self, api_key: str, model_reasoning: str, model_cheap: str):
+    def __init__(
+        self,
+        api_key: str,
+        model_reasoning: str,
+        model_cheap: str,
+        model_embedding: str = "text-embedding-3-small",
+    ):
         import openai  # importado aqui para nao crashar em testes sem OPENAI_API_KEY
 
         self._client = openai.AsyncOpenAI(api_key=api_key)
         self._model_reasoning = model_reasoning
         self._model_cheap = model_cheap
+        self._model_embedding = model_embedding
         logger.info(
-            "OpenAIClient inicializado: reasoning=%s cheap=%s",
+            "OpenAIClient inicializado: reasoning=%s cheap=%s embedding=%s",
             model_reasoning,
             model_cheap,
+            model_embedding,
         )
 
     async def chat_reasoning(
@@ -208,3 +216,38 @@ class OpenAIClient:
             len(text),
         )
         return text
+
+    async def embed(self, textos: list[str]) -> list[list[float]]:
+        """
+        Calcula embeddings semanticos (FR-009, RAG hibrido Onda 3) via
+        `RAG_EMBEDDING_MODEL` (default `text-embedding-3-small`, 1536 dims —
+        `data-model.md` §4, `app.repository.models.Chunk.embedding`).
+
+        Representacao calculada 1x, NUNCA recomputada a cada boot para
+        conteudo inalterado (research.md Decision 9) — cabe ao chamador
+        (`app/rag_seed.py`) decidir quais textos precisam ser (re)embedados
+        e enviar em lotes de no maximo 100 (dec-020 finding #2, API4/LLM10
+        Unbounded Consumption).
+
+        Args:
+            textos: lista de textos a embedar. Vazia retorna lista vazia
+                (nao-op — evita chamada de API sem necessidade).
+
+        Returns:
+            Lista de vetores (list[float]), na MESMA ORDEM de `textos`
+            (o chamador associa por indice ao persistir).
+        """
+        if not textos:
+            return []
+        response = await self._client.embeddings.create(
+            model=self._model_embedding,
+            input=textos,
+        )
+        vetores = [item.embedding for item in response.data]
+        logger.debug(
+            "embed: model=%s textos=%d dims=%s",
+            self._model_embedding,
+            len(textos),
+            len(vetores[0]) if vetores else "?",
+        )
+        return vetores

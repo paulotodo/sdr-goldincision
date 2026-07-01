@@ -18,7 +18,7 @@ import hmac
 import logging
 import time
 from collections import defaultdict
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.repository.models import (
+    Chunk,
     Curso,
     CursoApresentacao,
     CursoLink,
@@ -721,6 +722,144 @@ async def remover_numero_teste(
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="numero nao encontrado"
+            )
+        await db.delete(row)
+        await db.commit()
+    return None
+
+
+# ---------------------------------------------------------------------------
+# `/admin/chunks` — curadoria de chunk tipo='base' (RAG hibrido, Onda 3)
+#
+# Seguranca (dec-020 finding #1, API3 BOPLA — checklists/requirements.md
+# CHK034): `chunk` tambem e alimentado automaticamente por app/rag_seed.py
+# a partir de CursoObjecao (tipo='objecao') e Faq (tipo='faq'). Este
+# endpoint SOMENTE cura `tipo='base'` — nunca aceita objecao/faq (422) e
+# NUNCA aceita fonte_tabela/fonte_id/embedding/ativo do corpo da
+# requisicao (o servidor sempre grava fonte_tabela='admin' e
+# fonte_id=<id autoincrementado do proprio chunk>), para impedir que um
+# payload malicioso sequestre a linha auto-sincronizada de uma
+# objecao/FAQ real (mesma UNIQUE(fonte_tabela, fonte_id, idioma) de
+# app.repository.models.Chunk).
+# ---------------------------------------------------------------------------
+
+class ChunkCreate(BaseModel):
+    """
+    Corpo para curadoria de chunk `tipo='base'` (FR-007, dec-020 finding
+    #1). Aceita SOMENTE estes 4 campos (`extra='forbid'` — SEC-ADM-4):
+    tentativa de enviar `fonte_tabela`/`fonte_id`/`embedding`/`ativo`
+    (ou qualquer outro campo) e rejeitada com 422 antes de chegar a
+    camada de persistencia.
+
+    `tipo` e travado em `Literal["base"]`: enviar `objecao`/`faq` (as
+    2 origens exclusivamente auto-sincronizadas por `app/rag_seed.py`)
+    retorna 422 automaticamente (dec-020 finding #1).
+    """
+    model_config = ConfigDict(extra="forbid")
+    curso_id: Optional[int] = None
+    tipo: Literal["base"]
+    idioma: Literal["pt", "en", "es"]
+    conteudo: str = Field(min_length=1, max_length=4000)
+
+
+def _chunk_to_dict(c: Chunk) -> dict:
+    return {
+        "id": c.id,
+        "curso_id": c.curso_id,
+        "tipo": c.tipo,
+        "idioma": c.idioma,
+        "conteudo": c.conteudo,
+        "fonte_tabela": c.fonte_tabela,
+        "fonte_id": c.fonte_id,
+        "ativo": c.ativo,
+    }
+
+
+@router.post(
+    "/chunks",
+    status_code=status.HTTP_201_CREATED,
+    summary="Cria chunk de curadoria (tipo='base') para o RAG hibrido",
+    response_model=None,
+)
+async def criar_chunk(
+    payload: ChunkCreate,
+    _token: str = Depends(verify_admin_token),
+) -> dict:
+    """
+    Cria um chunk `tipo='base'` curado manualmente pelo admin.
+
+    O embedding e calculado depois, de forma assincrona, pelo proximo
+    ciclo de `app/rag_seed.py` (chunk fica com `embedding IS NULL` ate
+    la — mesma semantica de "pendente de embedding" de qualquer outro
+    chunk novo).
+    """
+    factory = _get_session()
+    async with factory() as db:
+        novo = Chunk(
+            curso_id=payload.curso_id,
+            tipo="base",
+            idioma=payload.idioma,
+            conteudo=payload.conteudo,
+            fonte_tabela="admin",
+            fonte_id=0,  # placeholder — corrigido para o proprio id logo abaixo
+            ativo=True,
+        )
+        db.add(novo)
+        await db.flush()  # obtem novo.id (sequence)
+        novo.fonte_id = novo.id  # fonte_id = <id autoincrementado do proprio chunk>
+        await db.commit()
+        await db.refresh(novo)
+        return _chunk_to_dict(novo)
+
+
+@router.get(
+    "/chunks",
+    summary="Lista chunks de curadoria (tipo='base')",
+    response_model=None,
+)
+async def list_chunks(
+    _token: str = Depends(verify_admin_token),
+) -> list[dict]:
+    """
+    Lista chunks `tipo='base'` — objecao/faq NAO aparecem aqui (sao
+    curados via seus proprios endpoints de admin ja existentes:
+    `/admin/cursos/{id}/objecoes`-equivalente e o catalogo do curso;
+    este endpoint e exclusivo da curadoria manual de base de conhecimento).
+    """
+    factory = _get_session()
+    async with factory() as db:
+        result = await db.execute(
+            select(Chunk).where(Chunk.tipo == "base").order_by(Chunk.id)
+        )
+        rows = result.scalars().all()
+        return [_chunk_to_dict(r) for r in rows]
+
+
+@router.delete(
+    "/chunks/{chunk_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove chunk de curadoria (restrito a tipo='base')",
+)
+async def deletar_chunk(
+    chunk_id: int,
+    _token: str = Depends(verify_admin_token),
+) -> None:
+    """
+    Remove um chunk por id — restrito a `tipo='base'` (dec-020 finding
+    #1): chunks `objecao`/`faq` sao auto-sincronizados por
+    `app/rag_seed.py` e NUNCA removidos manualmente por aqui (a
+    fonte-da-verdade continua sendo `curso_objecao`/`faq`).
+    """
+    factory = _get_session()
+    async with factory() as db:
+        result = await db.execute(
+            select(Chunk).where(Chunk.id == chunk_id, Chunk.tipo == "base")
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="chunk nao encontrado (ou nao e tipo='base')",
             )
         await db.delete(row)
         await db.commit()

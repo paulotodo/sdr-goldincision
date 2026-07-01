@@ -1,0 +1,132 @@
+{
+  "casos": [
+    {
+      "id": "rag_c1_groundedness_curso_online_pt",
+      "dimensao": "rag_hibrido",
+      "mensagem": "Qual a carga horária do curso?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {"texto": "A carga horária é de 40 horas em vídeo-aulas.", "handoff": false},
+      "knowledge": "BASE",
+      "rag": {
+        "chunks": [
+          {
+            "chunk_id": 501,
+            "conteudo": "O curso tem carga horária de 40 horas em vídeo-aulas.",
+            "tipo": "faq",
+            "score_combinado": 0.87
+          }
+        ]
+      },
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "caminho": 1,
+        "contains": ["40 horas"],
+        "knowledge_context_contains": ["O curso tem carga horária de 40 horas em vídeo-aulas."],
+        "fonte_ids": [501]
+      }
+    },
+    {
+      "id": "rag_c1_groundedness_curso_online_en",
+      "dimensao": "rag_hibrido",
+      "mensagem": "What is the course workload?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true, "idioma": "en"},
+      "intent": {"intencao": "ambigua", "idioma": "en"},
+      "responder": {"texto": "The course workload is 40 hours of video lessons.", "handoff": false},
+      "knowledge": "BASE",
+      "rag": {
+        "chunks": [
+          {
+            "chunk_id": 601,
+            "conteudo": "The course has a workload of 40 hours of video lessons.",
+            "tipo": "faq",
+            "score_combinado": 0.85
+          }
+        ]
+      },
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "contains": ["40 hours"],
+        "knowledge_context_contains": ["The course has a workload of 40 hours of video lessons."],
+        "fonte_ids": [601]
+      }
+    },
+    {
+      "id": "rag_c2_groundedness_presencial_objecao_pt",
+      "dimensao": "rag_hibrido",
+      "mensagem": "Tem desconto para pagamento à vista?",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "duvidas", "eh_medico": true,
+        "experiencia_corporal": true, "produto_interesse": "hg360-sp"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {"texto": "Sim, há 10% de desconto para pagamento à vista.", "handoff": false},
+      "knowledge": "BASE",
+      "rag": {
+        "chunks": [
+          {
+            "chunk_id": 502,
+            "conteudo": "Oferecemos 10% de desconto para pagamento à vista.",
+            "tipo": "objecao",
+            "score_combinado": 0.81
+          }
+        ]
+      },
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "caminho": 2,
+        "contains": ["10%"],
+        "knowledge_context_contains": ["Oferecemos 10% de desconto para pagamento à vista."],
+        "fonte_ids": [502]
+      }
+    },
+    {
+      "id": "rag_c1_abstencao_curto_circuito_curso_online_pt",
+      "dimensao": "rag_hibrido",
+      "mensagem": "Vocês aceitam pagamento em bitcoin?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {"texto": "RESPOSTA_QUE_NUNCA_DEVE_SER_USADA", "handoff": false},
+      "knowledge": "BASE",
+      "rag": {"abster": true, "motivo_abstencao": "abaixo_limiar"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "rag_abster_sem_chamar_llm": true,
+        "not_contains": ["RESPOSTA_QUE_NUNCA_DEVE_SER_USADA"]
+      }
+    },
+    {
+      "id": "rag_c3_abstencao_curto_circuito_licenciamento_pt",
+      "dimensao": "rag_hibrido",
+      "mensagem": "O licenciamento cobre uso em Marte?",
+      "estado_inicial": {"caminho": 3, "etapa": "sistema_licenciamento_duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {"texto": "RESPOSTA_QUE_NUNCA_DEVE_SER_USADA", "handoff": false},
+      "knowledge": "BASE",
+      "rag": {"abster": true, "motivo_abstencao": "sem_candidatos"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "rag_abster_sem_chamar_llm": true,
+        "not_contains": ["RESPOSTA_QUE_NUNCA_DEVE_SER_USADA"]
+      }
+    },
+    {
+      "id": "rag_c1_abstencao_curto_circuito_curso_online_es",
+      "dimensao": "rag_hibrido",
+      "mensagem": "¿Aceptan pago en bitcoin?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true, "idioma": "es"},
+      "intent": {"intencao": "ambigua", "idioma": "es"},
+      "responder": {"texto": "RESPOSTA_QUE_NUNCA_DEVE_SER_USADA", "handoff": false},
+      "knowledge": "BASE",
+      "rag": {"abster": true, "motivo_abstencao": "indisponivel"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "rag_abster_sem_chamar_llm": true,
+        "not_contains": ["RESPOSTA_QUE_NUNCA_DEVE_SER_USADA"]
+      }
+    }
+  ]
+}

@@ -6,24 +6,35 @@ ticket simultaneamente (FR-035-INFRA-MUTEX).
 Implementa: data-model.md §Estruturas Redis `lock:ticket:{chamadoId}`.
 
 Mecanismo:
-- SET NX PX 30000 `lock:ticket:{chamadoId}` -> UUID do dono
+- SET NX PX <settings.lock_ttl_ms> `lock:ticket:{chamadoId}` -> UUID do dono
 - Liberar SOMENTE se o dono ainda e o mesmo (Lua script atomico)
 - Liberacao erronea (outro dono) e detectada silenciosamente
 
-Implementacao: FASE 3, task 3.2.3
+Implementacao: FASE 3, task 3.2.3. TTL elevado para 90s (default
+`settings.lock_ttl_ms`) na FASE 6, task 6.1.1 — ver research.md Decision 4:
+pior caso de turno = LLM + ate 4 envios paced + retries (~30-50s), 90s
+cobre com folga. Pacing distribuido entre multiplas replicas (FR-014)
+fica documentado como decisao consciente adiada — ver research.md
+Decision 4/plano-controle-turnos.md §Fase 4 (so necessario com >1 replica;
+hoje a stack roda com 1).
 """
 from __future__ import annotations
 
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Optional
 
+from app.config import settings
 from app.core.redis_keys import lock_key
 
 logger = logging.getLogger(__name__)
 
-_LOCK_PX = 30_000  # 30s em milissegundos
+# Fallback documental — o TTL EFETIVO vem de `settings.lock_ttl_ms`
+# (env-driven, default 90_000 desde a task 1.1.3/6.1.1). So usado se o
+# caller explicitamente passar `lock_ttl_ms=None` E `settings` falhar ao
+# carregar (nao deve ocorrer em uso normal).
+_LOCK_PX_FALLBACK = 30_000  # 30s em milissegundos (valor pre-FASE 6)
 
 # Script Lua atomico para liberacao segura do lock
 # Libera SOMENTE se o valor atual e o token do dono
@@ -40,7 +51,8 @@ class TicketLock:
     """
     Lock distribuido por ticket usando Redis SET NX PX.
 
-    Chave: `lock:ticket:{chamadoId}`, TTL 30s (PX 30000).
+    Chave: `lock:ticket:{chamadoId}`, TTL default `settings.lock_ttl_ms`
+    (90s — task 6.1.1; env-driven via `LOCK_TTL_MS`).
     Valor: UUID gerado no acquire — garante que somente o dono libera.
 
     Uso como context manager:
@@ -50,8 +62,14 @@ class TicketLock:
             # ... processar ...
     """
 
-    def __init__(self, redis_client: Any) -> None:
+    def __init__(self, redis_client: Any, lock_ttl_ms: Optional[int] = None) -> None:
         self._redis = redis_client
+        # TTL efetivo: parametro explicito > settings.lock_ttl_ms (env-driven,
+        # default 90_000) > fallback documental (task 6.1.1).
+        if lock_ttl_ms is not None:
+            self._ttl_ms = lock_ttl_ms
+        else:
+            self._ttl_ms = getattr(settings, "lock_ttl_ms", None) or _LOCK_PX_FALLBACK
 
     @asynccontextmanager
     async def acquire(self, chamado_id: int) -> AsyncGenerator[bool, None]:
@@ -69,7 +87,7 @@ class TicketLock:
         token = str(uuid.uuid4())
 
         # SET NX PX: retorna True se criou, None se ja existia
-        acquired_result = await self._redis.set(key, token, nx=True, px=_LOCK_PX)
+        acquired_result = await self._redis.set(key, token, nx=True, px=self._ttl_ms)
         acquired = acquired_result is not None
 
         if acquired:

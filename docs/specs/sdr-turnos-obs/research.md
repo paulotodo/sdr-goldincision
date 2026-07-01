@@ -91,6 +91,35 @@ VI (isolamento/robustez de infra).
   adiar até que os dados mostrem turnos > 90s.
 - Manter 30s → risco real de re-processamento em turno lento (G4).
 
+**Implementation Note (FASE 6, task 6.1.1/6.1.2/6.1.3)**: `TicketLock`
+(`app/core/locks.py`) passou a usar `settings.lock_ttl_ms` (env-driven,
+default `90_000`, já configurado desde a task 1.1.3) como TTL efetivo do
+`SET NX PX`, substituindo o antigo default fixo de `30_000`. O construtor
+aceita `lock_ttl_ms` explícito para override pontual (testes/cenários
+especiais), com `settings.lock_ttl_ms` como fallback padrão.
+
+**Pendência explícita (task 6.1.2 — SC-010 valida em produção
+separadamente)**: o valor de 90s segue sendo a estimativa analítica da
+Decision 4 (LLM + envios paced + retries, ~30-50s com folga). Esta rodada
+implementa e testa a elevação do TTL (`tests/test_lock_ttl.py` simula
+processamento de ~85s permanecendo dentro do TTL, contra o TTL antigo de
+30s que expiraria no mesmo cenário), mas **não há ainda dados reais de
+produção** de `duracao_ms` (evento de turno, US5/FASE 2) coletados sobre
+esta feature para confirmar empiricamente o valor — os dados de produção
+só existirão após o deploy. SC-010 é responsável por essa validação
+separada, com base no `duracao_ms` observado no evento de turno.
+
+**Decisão consciente adiada (task 6.1.3, FR-014)**: a distribuição de
+pacing entre múltiplas réplicas (G5) permanece **fora do escopo** desta
+feature — documentada em `plan.md` §Technical Context (Scale/Scope) como
+pré-condição que só se torna necessária com **mais de 1 réplica** (a stack
+roda hoje com 1 réplica, `stack.yml`). Elevar o TTL do lock por-ticket
+resolve o risco imediato (G4, turno lento sendo reprocessado); o pacing
+distribuído (coordenação de `whatsapp_min_interval_ms` entre processos)
+é um problema ortogonal que só surge com escala horizontal — não
+implementado aqui, sem débito técnico oculto (a decisão está registrada,
+não apenas ausente).
+
 ## Decision 5: Evento de turno — reusar `observability/log.py`
 
 **Decision**: Adicionar `log_turno(...)` em `app/observability/log.py`

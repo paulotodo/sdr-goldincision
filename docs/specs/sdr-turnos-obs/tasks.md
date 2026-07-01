@@ -244,16 +244,16 @@ checklists/requirements.md CHK005
 Ref: Spec FR-013, FR-014; research.md Decision 4; `locks.py`,
 `redis_keys.py`. Depende dos dados de `duracao_ms` emitidos pela FASE 2.
 
-- [ ] 6.1.1 Elevar `LOCK_TTL_MS` default para 90000 (já configurado via
+- [x] 6.1.1 Elevar `LOCK_TTL_MS` default para 90000 (já configurado via
   1.1.3) e aplicar no mecanismo de lock por atendimento em `locks.py`
-- [ ] 6.1.2 Documentar em `research.md`/`plan.md` a confirmação empírica
+- [x] 6.1.2 Documentar em `research.md`/`plan.md` a confirmação empírica
   do valor de 90s via `duracao_ms` coletado (ou nota de pendência
   explícita se dados de produção ainda não estiverem disponíveis nesta
   rodada — SC-010 valida em produção separadamente)
-- [ ] 6.1.3 Documentar como decisão consciente adiada a distribuição do
+- [x] 6.1.3 Documentar como decisão consciente adiada a distribuição do
   pacing entre múltiplas réplicas (FR-014) — sem implementação nesta
   feature
-- [ ] 6.1.4 Escrever teste simulando turno de duração próxima ao pior
+- [x] 6.1.4 Escrever teste simulando turno de duração próxima ao pior
   caso conhecido (LLM + múltiplos envios + retries), garantindo que o
   lock permanece válido até o fim do processamento (Acceptance
   Scenario 1, US4; SC-006)

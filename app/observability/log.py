@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -35,6 +36,68 @@ _FORBIDDEN_KEYS = frozenset(
         "authorization", "bearer",
     }
 )
+
+# ---------------------------------------------------------------------------
+# Scrubber anti-PII de TEXTO LIVRE (FASE 4, task 4.2 — sdr-fidelidade-json).
+#
+# `_scrub` (acima) remove CHAVES de dict conhecidas (defesa contra
+# secrets/tokens). Este bloco cobre um caso distinto: texto livre GERADO
+# PELO MODELO (ex.: `VeredictoFidelidade.afirmacoes_nao_sustentadas` do
+# Portao de Fidelidade, `app/core/fidelity.py`) pode, em tese, ecoar um
+# trecho do contexto de conhecimento ou da mensagem do lead contendo um
+# email/telefone/CPF. Antes de qualquer texto assim chegar a um sink de
+# observabilidade (`log_turno`), ele passa por `scrub_texto_livre` —
+# fail-safe: qualquer excecao de regex -> None (o chamador trata None como
+# "nao disponivel para log" e cai no fallback de contagem apenas).
+# ---------------------------------------------------------------------------
+
+_RE_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_RE_CPF = re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")
+_RE_TELEFONE = re.compile(r"(?:\+?\d[\d\s().-]{7,}\d)")
+
+
+def scrub_texto_livre(texto: Optional[str]) -> Optional[str]:
+    """
+    Redige padroes comuns de PII (email, CPF, telefone) de um texto livre.
+
+    Fail-safe: qualquer excecao durante a redacao retorna None — o chamador
+    deve tratar None como "scrubbing indisponivel" e aplicar o fallback
+    (nunca logar o texto bruto nesse caso).
+    """
+    if not texto:
+        return texto
+    try:
+        out = _RE_EMAIL.sub("<email>", texto)
+        out = _RE_CPF.sub("<cpf>", out)
+        out = _RE_TELEFONE.sub("<telefone>", out)
+        return out
+    except Exception:
+        return None
+
+
+def scrub_afirmacoes_nao_sustentadas(
+    afirmacoes: Optional[list[str]],
+) -> tuple[Optional[list[str]], int]:
+    """
+    Aplica `scrub_texto_livre` a cada afirmacao nao sustentada do veredito de
+    fidelidade (`app/core/fidelity.py:VeredictoFidelidade`).
+
+    Retorna `(lista_redigida_ou_None, contagem)`:
+    - Sucesso: `(lista_redigida, len(afirmacoes))`.
+    - Falha (qualquer excecao) ou entrada vazia/None: `(None, contagem)` —
+      fallback do chamador e logar SOMENTE a contagem, nunca texto bruto.
+    """
+    if not afirmacoes:
+        return None, 0
+    try:
+        redigidas = [scrub_texto_livre(a) for a in afirmacoes]
+        if any(r is None for r in redigidas):
+            # Uma falha pontual de scrub em qualquer item -> fallback total
+            # (nunca mistura texto bruto com texto redigido).
+            return None, len(afirmacoes)
+        return redigidas, len(afirmacoes)
+    except Exception:
+        return None, len(afirmacoes)
 
 
 def _mask_number(number: Optional[str]) -> Optional[str]:
@@ -219,6 +282,9 @@ def log_turno(
     intencao: Optional[str] = None,
     handoff_destino: Optional[str] = None,
     motivo: Optional[str] = None,
+    confianca_slot: Optional[float] = None,
+    fidelidade_fiel: Optional[bool] = None,
+    fidelidade_afirmacoes_nao_sustentadas: Optional[list[str]] = None,
 ) -> None:
     """
     Registra evento estruturado de observabilidade de turno (US5, FR-015,
@@ -242,6 +308,27 @@ def log_turno(
 
     `acao` deve pertencer a: resposta | nudge | handoff | retomada |
     sessao_nova | erro.
+
+    Campos ADITIVOS (FASE 4, sdr-fidelidade-json, task 4.3 — NUNCA alteram
+    o contrato/schema da Onda 1: sao OPTIONAL, default None, e so entram no
+    evento emitido quando o CHAMADO explicitamente os passa; uma chamada
+    sem esses kwargs produz EXATAMENTE o mesmo payload de antes):
+    - `confianca_slot`: confianca (0..1) do fallback agentico de
+      slot-filling (`app/core/interpret.py:SlotExtractor`) quando acionado
+      neste turno (Pilar 8). None quando o turno resolveu por fast-path
+      deterministico ou nao envolveu slot-filling.
+    - `fidelidade_fiel`: resultado (`fiel: bool`) do Portao de Fidelidade
+      (`app/core/fidelity.py:FidelityGate`) quando acionado neste turno
+      (Pilar 7). None quando o portao nao foi acionado (texto sem condicao
+      comercial, ou verbatim — que nunca passa pelo portao).
+    - `fidelidade_afirmacoes_nao_sustentadas`: texto livre GERADO PELO
+      MODELO (nunca a mensagem do lead) — task 4.2: SEMPRE roteado por
+      `scrub_texto_livre`/`scrub_afirmacoes_nao_sustentadas` (scrubber
+      anti-PII) DENTRO desta funcao antes do `_emit`, nunca verbatim.
+      Fallback fail-safe (scrubbing indisponivel/erro): o campo de texto e
+      OMITIDO do evento e substituido por
+      `fidelidade_n_afirmacoes_nao_sustentadas` (apenas a contagem, sempre
+      seguro).
     """
     if acao not in _TURNO_ACOES:
         logger.warning("log_turno: acao desconhecida %r (aceitas: %s)", acao, sorted(_TURNO_ACOES))
@@ -262,6 +349,25 @@ def log_turno(
         "tentativas": tentativas,
         "motivo": motivo,
     }
+
+    # --- Campos aditivos (task 4.3) — SO adicionados quando explicitamente
+    # passados pelo chamador, preservando o contrato exato da Onda 1 quando
+    # nao usados (ver docstring acima e tests/test_observability_fidelidade_slot.py).
+    if confianca_slot is not None:
+        event["confianca_slot"] = confianca_slot
+    if fidelidade_fiel is not None:
+        event["fidelidade_fiel"] = fidelidade_fiel
+    if fidelidade_afirmacoes_nao_sustentadas is not None:
+        # task 4.2: scrubber anti-PII ANTES de qualquer inclusao no log;
+        # fallback = so a contagem quando o scrubbing falha/indisponivel.
+        redigidas, contagem = scrub_afirmacoes_nao_sustentadas(
+            fidelidade_afirmacoes_nao_sustentadas
+        )
+        if redigidas is not None:
+            event["fidelidade_afirmacoes_nao_sustentadas"] = redigidas
+        else:
+            event["fidelidade_n_afirmacoes_nao_sustentadas"] = contagem
+
     _emit(event)
 
 

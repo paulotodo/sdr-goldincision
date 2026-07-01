@@ -905,6 +905,9 @@ class FlowResult:
         handoff_motivo: Optional[str] = None,
         turno_acao: Optional[str] = None,
         motivo: Optional[str] = None,
+        confianca_slot: Optional[float] = None,
+        fidelidade_fiel: Optional[bool] = None,
+        fidelidade_afirmacoes_nao_sustentadas: Optional[list] = None,
     ):
         self.response_text = response_text
         self.action = action
@@ -923,6 +926,15 @@ class FlowResult:
         # "pedido_humano", usado tambem para persistencia em Ticket).
         self.turno_acao = turno_acao
         self.motivo = motivo
+        # Observabilidade aditiva (FASE 4, task 4.3 — sdr-fidelidade-json):
+        # atribuidos POS-HOC por `FlowEngine.process()` (nao pelos handlers
+        # que constroem FlowResult), a partir do estado do turno corrente —
+        # ver `process()`. None quando o mecanismo correspondente nao foi
+        # acionado neste turno (fast-path deterministico / sem condicao
+        # comercial / verbatim).
+        self.confianca_slot = confianca_slot
+        self.fidelidade_fiel = fidelidade_fiel
+        self.fidelidade_afirmacoes_nao_sustentadas = fidelidade_afirmacoes_nao_sustentadas
 
 
 class FlowEngine:
@@ -954,6 +966,13 @@ class FlowEngine:
         # padrao de `fidelity_gate` em GroundedResponder). Quando None, os
         # resolvers de slot caem direto no fast-path/"nao entendido".
         self._slot_extractor = slot_extractor
+        # Observabilidade aditiva (FASE 4, task 4.3): confianca do ULTIMO
+        # fallback agentico de slot-filling acionado no turno corrente.
+        # Resetado a cada `process()` (evita vazamento entre turnos) e
+        # setado pelos resolvers (`_resolver_slot_booleano` e demais) SOMENTE
+        # quando o `SlotExtractor` de fato roda (fast-path resolvido nao
+        # define confianca — nao ha "confianca do fallback" a reportar).
+        self._last_confianca_slot: Optional[float] = None
 
     async def process(
         self, ticket_id: int, user_message: str, context: SessionContext
@@ -977,10 +996,31 @@ class FlowEngine:
            ambos disparam no mesmo turno (escalonamento de negocio e mais
            urgente que uma mensagem de boas-vindas).
         """
+        # Observabilidade aditiva (task 4.3): resetar ANTES do turno para
+        # nunca vazar o veredito/confianca de um turno anterior quando o
+        # mecanismo correspondente nao e acionado no turno corrente.
+        self._last_confianca_slot = None
+        if self._responder is not None:
+            self._responder.last_fidelidade_fiel = None
+            self._responder.last_fidelidade_afirmacoes_nao_sustentadas = None
+
         estado_inatividade = self._aplicar_reengajamento_pre(context)
         result = await self._process_core(ticket_id, user_message, context)
         result = self._aplicar_reengajamento_pos(context, result, estado_inatividade)
-        return self._aplicar_orcamento_turnos(context, result)
+        result = self._aplicar_orcamento_turnos(context, result)
+
+        # Anexar observabilidade aditiva ao FlowResult final (pos-hoc — task
+        # 4.3): nunca altera decisao de fluxo, apenas repassa o que os
+        # mecanismos de Pilar 7/Pilar 8 registraram neste turno (ou None,
+        # se nenhum foi acionado). `self._responder` pode ser None em
+        # cenarios de teste legados que nao o injetam.
+        result.confianca_slot = self._last_confianca_slot
+        if self._responder is not None:
+            result.fidelidade_fiel = self._responder.last_fidelidade_fiel
+            result.fidelidade_afirmacoes_nao_sustentadas = (
+                self._responder.last_fidelidade_afirmacoes_nao_sustentadas
+            )
+        return result
 
     # ------------------------------------------------------------------
     # Timeout de inatividade e reengajamento (US2, FASE 5 — FR-008 a FR-010)
@@ -1329,6 +1369,7 @@ class FlowEngine:
         if self._slot_extractor is None:
             return None
         slot = await self._slot_extractor.extract(slot_schema, user_message, contexto)
+        self._last_confianca_slot = slot.confianca  # observabilidade aditiva (task 4.3)
         limiar = settings.slot_confidence_threshold
         if not SlotExtractor.aceitar(slot, limiar):
             return None
@@ -1373,6 +1414,7 @@ class FlowEngine:
         slot = await self._slot_extractor.extract(
             _SLOT_SCHEMA_OBJETIVO_SISTEMA, user_message, _perfil_conhecido(context),
         )
+        self._last_confianca_slot = slot.confianca  # observabilidade aditiva (task 4.3)
         if not SlotExtractor.aceitar(slot, settings.slot_confidence_threshold):
             return None
         valor = _norm(slot.valor or "")
@@ -1396,6 +1438,7 @@ class FlowEngine:
         slot = await self._slot_extractor.extract(
             _SLOT_SCHEMA_ESPECIALIDADE, user_message, _perfil_conhecido(context),
         )
+        self._last_confianca_slot = slot.confianca  # observabilidade aditiva (task 4.3)
         if not SlotExtractor.aceitar(slot, settings.slot_confidence_threshold):
             return None
         valor = _norm(slot.valor or "")
@@ -1428,6 +1471,7 @@ class FlowEngine:
         slot = await self._slot_extractor.extract(
             _SLOT_SCHEMA_ESCOLHA_TURMA, user_message, _perfil_conhecido(context),
         )
+        self._last_confianca_slot = slot.confianca  # observabilidade aditiva (task 4.3)
         if not SlotExtractor.aceitar(slot, settings.slot_confidence_threshold):
             return None
         valor = _norm(slot.valor or "")

@@ -414,6 +414,16 @@ async def _handle_engine(
             _turno_evt["tentativas"] = (
                 _tent_count(context, flow_result.etapa) if flow_result.etapa else 0
             )
+            # Observabilidade aditiva (FASE 4, task 4.3 — sdr-fidelidade-json):
+            # confianca de slot-filling (Pilar 8) e veredito do Portao de
+            # Fidelidade (Pilar 7) deste turno, quando acionados. None quando
+            # o mecanismo correspondente nao rodou — log_turno OMITE o campo
+            # nesse caso (contrato aditivo, nunca quebra o schema da Onda 1).
+            _turno_evt["confianca_slot"] = flow_result.confianca_slot
+            _turno_evt["fidelidade_fiel"] = flow_result.fidelidade_fiel
+            _turno_evt["fidelidade_afirmacoes_nao_sustentadas"] = (
+                flow_result.fidelidade_afirmacoes_nao_sustentadas
+            )
 
             # ---------------------------------------------------------------
             # 4. Persistir atualizacoes de estado
@@ -522,6 +532,11 @@ async def _handle_engine(
                     intencao=_turno_evt.get("intencao"),
                     handoff_destino=_turno_evt.get("handoff_destino"),
                     motivo=_turno_evt.get("motivo"),
+                    confianca_slot=_turno_evt.get("confianca_slot"),
+                    fidelidade_fiel=_turno_evt.get("fidelidade_fiel"),
+                    fidelidade_afirmacoes_nao_sustentadas=_turno_evt.get(
+                        "fidelidade_afirmacoes_nao_sustentadas"
+                    ),
                 )
 
 

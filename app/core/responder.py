@@ -203,6 +203,15 @@ class GroundedResponder:
         # pilar. Producao SEMPRE injeta um (app/api/webhook.py). None
         # desativa o portao (equivalente a sempre aprovar a resposta gerada).
         self._fidelity_gate = fidelity_gate
+        # Observabilidade aditiva (FASE 4, task 4.3 — sdr-fidelidade-json):
+        # ultimo veredito do Portao de Fidelidade desta instancia, exposto
+        # para o FlowEngine repassar a `log_turno` sem alterar a assinatura
+        # de `generate()` (que permanece a 2-tupla `(texto, handoff)` — FR-006).
+        # `FlowEngine.process()` reseta estes atributos ANTES de cada turno
+        # (evita vazamento de veredito de um turno anterior quando o portao
+        # nao e acionado no turno corrente).
+        self.last_fidelidade_fiel: Optional[bool] = None
+        self.last_fidelidade_afirmacoes_nao_sustentadas: Optional[list[str]] = None
 
     async def generate(
         self,
@@ -363,6 +372,13 @@ class GroundedResponder:
         # "informacao indisponivel" + handoff (nunca conteudo nao sustentado).
         if self._fidelity_gate is not None and gatilho_condicao_comercial(pacote.texto):
             veredito = await self._fidelity_gate.verificar(pacote.texto, knowledge_context)
+            # Observabilidade aditiva (task 4.3): expor o veredito para o
+            # FlowEngine repassar a log_turno, independente de fiel=True/False
+            # (nunca altera o comportamento/retorno de generate() — FR-006).
+            self.last_fidelidade_fiel = veredito.fiel
+            self.last_fidelidade_afirmacoes_nao_sustentadas = list(
+                veredito.afirmacoes_nao_sustentadas
+            )
             if not veredito.fiel:
                 logger.warning(
                     "responder: portao de fidelidade reprovou a resposta gerada "

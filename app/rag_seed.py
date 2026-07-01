@@ -11,17 +11,25 @@ Fluxo de `run_rag_seed(db_session, openai_client)`:
      REALMENTE mudou (o Postgres nao inclui no RETURNING as linhas cujo
      WHERE do DO UPDATE avaliou falso, ou seja, conteudo inalterado = nop
      silencioso, sem invalidar o embedding existente).
-  2. Candidatos a (re)embedding = linhas retornadas (novas OU alteradas)
-     UNIAO linhas com `embedding IS NULL` (cobre recovery de boot
-     interrompido entre o upsert de texto e o calculo do embedding).
-  3. Embeddings calculados em lotes de no maximo 100 textos por chamada a
+  2. Reconciliacao de `ativo` (tombstoning): para `curso_objecao`/`faq`,
+     desativa (`ativo=False`) chunks orfaos — cuja fonte foi removida (ambas)
+     ou marcada `ativo=False` (so `faq`, que tem essa coluna) — e reativa os
+     vigentes. Sem isto, um upsert-only deixaria conteudo que saiu da Base
+     Oficial ainda recuperavel (violacao anti-alucinacao).
+  3. Candidatos a (re)embedding = linhas retornadas (novas OU alteradas)
+     UNIAO TODO chunk ATIVO com `embedding IS NULL` — de QUALQUER fonte,
+     inclusive `admin` (chunks `tipo='base'` curados via `/admin/chunks`,
+     que gravam `embedding IS NULL` e delegam o calculo a este seed) e
+     recovery de boot interrompido.
+  4. Embeddings calculados em lotes de no maximo 100 textos por chamada a
      `OpenAIClient.embed()` (dec-020 finding #2, API4/LLM10 Unbounded
      Consumption, `checklists/requirements.md` CHK035) — representacao
      semantica calculada 1x, NUNCA recomputada a cada boot para conteudo
      inalterado (FR-009).
 
-Curadoria de `tipo='base'` (Decision 2) e feita via `/admin/chunks`
-(app/api/admin.py, FASE 3) — upsert direto, fora deste modulo.
+Curadoria do TEXTO de `tipo='base'` (Decision 2) e feita via `/admin/chunks`
+(app/api/admin.py, FASE 3) — upsert direto, fora deste modulo; o EMBEDDING
+desses chunks e calculado aqui (passo 3).
 
 Chamado em `app/main.py:lifespan` DEPOIS de `app.seed.run_seed`, envolto em
 try/except NAO-FATAL (mesmo padrao de `app/main.py:102-118`, Decision 0):
@@ -101,6 +109,48 @@ async def _pendentes_embedding(session: "AsyncSession", fonte_tabela: str) -> se
     return {row_id for (row_id,) in result.all()}
 
 
+async def _pendentes_embedding_todos(session: "AsyncSession") -> set[int]:
+    """
+    Ids de TODO chunk ATIVO ainda sem embedding — qualquer `fonte_tabela`,
+    inclusive `admin` (curadoria de `tipo='base'` via `/admin/chunks`, que
+    grava `embedding IS NULL` e delega o calculo a este seed). Sem isto, os
+    chunks `base` nunca entrariam na perna VETORIAL da recuperacao (so na
+    lexical), tornando a curadoria semanticamente invisivel.
+    """
+    result = await session.execute(
+        select(Chunk.id).where(
+            Chunk.embedding.is_(None), Chunk.ativo.is_(True)
+        )
+    )
+    return {row_id for (row_id,) in result.all()}
+
+
+async def _reconciliar_ativo(
+    session: "AsyncSession", fonte_tabela: str, ativos_fonte_ids: set[int]
+) -> None:
+    """
+    Reconcilia `chunk.ativo` de uma fonte sincronizada (`curso_objecao`/`faq`)
+    com o conjunto vigente de `fonte_id`s ATIVOS da origem: ativa os presentes
+    e DESATIVA os orfaos (fonte removida ou marcada `ativo=False`). Sem esta
+    reconciliacao, um upsert-only deixaria chunks de conteudo que saiu da Base
+    Oficial ainda `ativo=True` e recuperaveis — violacao anti-alucinacao
+    (servir apenas a Base Oficial vigente). NAO toca `fonte_tabela='admin'`
+    (curadoria manual; tombstone via DELETE /admin/chunks).
+    """
+    stmt = (
+        update(Chunk)
+        .where(Chunk.fonte_tabela == fonte_tabela)
+        .values(ativo=Chunk.fonte_id.in_(sorted(ativos_fonte_ids)))
+    )
+    result = await session.execute(stmt)
+    logger.info(
+        "rag_seed: reconciliacao ativo de %s (%d fonte(s) ativa(s), rows=%s)",
+        fonte_tabela,
+        len(ativos_fonte_ids),
+        getattr(result, "rowcount", "?"),
+    )
+
+
 async def _embed_pendentes(
     session: "AsyncSession", openai_client: "OpenAIClient", ids: list[int]
 ) -> int:
@@ -154,6 +204,9 @@ async def run_rag_seed(
     """
     logger.info("rag_seed: iniciando sincronizacao de chunks...")
 
+    # `CursoObjecao` nao tem coluna `ativo` (diferente de `Faq`): a unica
+    # forma de saida da Base Oficial e a delecao da linha — coberta pela
+    # reconciliacao de `ativo` abaixo (fonte_id ausente -> chunk orfao).
     objecoes = (await session.execute(select(CursoObjecao))).scalars().all()
     objecao_rows = [
         {
@@ -166,6 +219,7 @@ async def run_rag_seed(
         }
         for o in objecoes
     ]
+    ativos_objecao = {o.id for o in objecoes}
     changed = await _upsert_chunks_from_rows(session, objecao_rows)
 
     faqs = (
@@ -182,7 +236,14 @@ async def run_rag_seed(
         }
         for f in faqs
     ]
+    ativos_faq = {f.id for f in faqs}
     changed |= await _upsert_chunks_from_rows(session, faq_rows)
+
+    # Reconciliacao de `ativo` (tombstoning): fontes removidas/desativadas
+    # nao podem continuar recuperaveis (anti-alucinacao — servir apenas a
+    # Base Oficial vigente). Roda tambem no caminho sem openai_client.
+    await _reconciliar_ativo(session, "curso_objecao", ativos_objecao)
+    await _reconciliar_ativo(session, "faq", ativos_faq)
 
     logger.info(
         "rag_seed: %d chunk(s) inserido(s)/atualizado(s) (objecao=%d, faq=%d candidatos)",
@@ -199,9 +260,11 @@ async def run_rag_seed(
         await session.commit()
         return
 
+    # Candidatos a (re)embedding: alterados (embedding vigente ficou obsoleto)
+    # UNIAO todo chunk ATIVO com `embedding IS NULL` (novos + `admin`/base
+    # curados + recovery de boot interrompido).
     pendentes = changed.copy()
-    pendentes |= await _pendentes_embedding(session, "curso_objecao")
-    pendentes |= await _pendentes_embedding(session, "faq")
+    pendentes |= await _pendentes_embedding_todos(session)
 
     if pendentes:
         n = await _embed_pendentes(session, openai_client, sorted(pendentes))

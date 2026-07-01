@@ -151,6 +151,11 @@ class Settings(BaseSettings):
     # disso -> tratado como "nao entendido" -> reformula (nunca adivinha).
     slot_confidence_threshold: float = 0.6
 
+    # --- RAG Hibrido (Onda 3, FR-007..FR-023) ---
+    # Modelo de embeddings usado por OpenAIClient.embed() / app/rag_seed.py
+    # (data-model.md §4). 1536 dimensoes (Vector(1536) em app.repository.models.Chunk).
+    rag_embedding_model: str = "text-embedding-3-small"
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v: str) -> str:

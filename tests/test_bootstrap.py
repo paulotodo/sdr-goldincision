@@ -5,10 +5,13 @@ Verifica:
 - Aplicacao sobe sem excecao
 - GET /health retorna 200 com body correto
 - Resposta do /health < 3s
+- Falha do rag_seed (extensao vector/tabela chunk pre-swap) nao derruba
+  o boot (task 2.2.8, Onda 3 — RAG hibrido)
 """
 from __future__ import annotations
 
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -96,3 +99,24 @@ def test_webhook_stub_returns_200(client):
     )
     assert response.status_code == 200
     assert response.json().get("ack") == "ok"
+
+
+def test_boot_tolera_falha_rag_seed_extensao_vector_ausente(monkeypatch):
+    """
+    Task 2.2.8: se `run_rag_seed` falhar (ex.: extensao `vector`/tabela
+    `chunk` ainda ausente, pre-swap da imagem do Postgres para
+    pgvector/pgvector — task 10.3.3), o boot do app NAO e derrubado —
+    mesmo padrao try/except nao-fatal ja usado para `run_seed`
+    (app/main.py, Decision 0/research.md).
+    """
+    import app.rag_seed as rag_seed_module
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError('relation "chunk" does not exist')
+
+    monkeypatch.setattr(rag_seed_module, "run_rag_seed", AsyncMock(side_effect=_boom))
+
+    with TestClient(app) as boot_client:
+        response = boot_client.get("/health")
+
+    assert response.status_code == 200

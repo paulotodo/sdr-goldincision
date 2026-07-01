@@ -117,6 +117,33 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("sdr-whatsapp: falha no seed — continuando")
 
+        # Sincronizacao idempotente de `chunk` + embeddings (RAG hibrido,
+        # Onda 3, FR-009/FR-010/FR-023-INFRA-IDEMP, research.md Decision 9).
+        # NAO-FATAL (mesmo padrao acima, Decision 0): a extensao `vector`/
+        # tabela `chunk` pode ainda nao existir ate o swap da imagem do
+        # Postgres para pgvector/pgvector (task 10.3.3) — nao deve derrubar
+        # o boot do app nesse periodo pre-swap (task 2.2.5).
+        try:
+            from app.rag_seed import run_rag_seed
+
+            _rag_openai_client: Optional[Any] = None
+            if settings.openai_api_key:
+                from app.integrations.openai_client import OpenAIClient
+                _rag_openai_client = OpenAIClient(
+                    api_key=settings.openai_api_key,
+                    model_reasoning=settings.openai_model_reasoning,
+                    model_cheap=settings.openai_model_cheap,
+                    model_embedding=settings.rag_embedding_model,
+                )
+            async with _session_factory() as _rag_session:
+                await run_rag_seed(_rag_session, _rag_openai_client)
+            logger.info("sdr-whatsapp: rag_seed (chunks + embeddings) concluido")
+        except Exception:
+            logger.exception(
+                "sdr-whatsapp: falha no rag_seed (extensao vector/tabela chunk "
+                "podem ainda nao existir pre-swap pgvector) — continuando"
+            )
+
     # Inicializar pool Redis (importacao lazy)
     try:
         import redis.asyncio as aioredis

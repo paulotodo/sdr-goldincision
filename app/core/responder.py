@@ -14,10 +14,13 @@ Usa o modelo de raciocinio (gpt-4o) com:
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from app.core.contracts import RespostaEstruturada
 from app.core.fidelity import FidelityGate, gatilho_condicao_comercial
+
+if TYPE_CHECKING:
+    from app.core.retrieval import ChunkRecuperado
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +215,13 @@ class GroundedResponder:
         # nao e acionado no turno corrente).
         self.last_fidelidade_fiel: Optional[bool] = None
         self.last_fidelidade_afirmacoes_nao_sustentadas: Optional[list[str]] = None
+        # Rastreabilidade aditiva (FASE 5, Onda 3 — FR-011, FR-012,
+        # data-model.md §3): ids dos chunks efetivamente incluidos no
+        # `knowledge_context` deste turno (`chunks_recuperados`), populados
+        # DETERMINISTICAMENTE por `generate()` — NUNCA reportado/inventado
+        # pelo LLM. Resetado a cada turno por `FlowEngine.process()` (mesmo
+        # padrao de `last_fidelidade_fiel`).
+        self.last_fonte_ids: Optional[list[str]] = None
 
     async def generate(
         self,
@@ -223,6 +233,7 @@ class GroundedResponder:
         session_summary: Optional[str] = None,
         idioma: str = "pt",
         known_facts: Optional[str] = None,
+        chunks_recuperados: Optional[list["ChunkRecuperado"]] = None,
     ) -> tuple[str, bool]:
         """
         Gera resposta grounded no contexto de conhecimento oficial.
@@ -237,6 +248,11 @@ class GroundedResponder:
             idioma: codigo do idioma (pt/en/es)
             known_facts: fatos ja conhecidos do lead (anti-redundancia) — quando
                 presente, e injetado no system prompt para o LLM nao re-perguntar
+            chunks_recuperados: chunks do `HybridRetriever` (Onda 3) que
+                efetivamente compoem `knowledge_context` neste turno — usados
+                SOMENTE para popular `self.last_fonte_ids` deterministicamente
+                (`chunk.id`, nunca reportado pelo LLM). `None`/vazio (chamadores
+                legados sem RAG, verbatim) -> `last_fonte_ids=None` (FR-011).
 
         Returns:
             (texto_resposta, handoff_necessario)
@@ -248,6 +264,13 @@ class GroundedResponder:
         FlowEngine NUNCA recebe o objeto `RespostaEstruturada` (FR-006) — apenas
         esta 2-tupla.
         """
+        # FR-011 (data-model.md §3): populado ANTES de qualquer chamada ao LLM —
+        # reflete exatamente o que foi injetado no prompt deste turno, nao o que
+        # a geracao "alega" ter usado.
+        self.last_fonte_ids = (
+            [str(c.chunk_id) for c in chunks_recuperados] if chunks_recuperados else None
+        )
+
         idioma_nome = _IDIOMA_NOMES.get(idioma, "Português")
         # Resolve o prompt por SLUG (corrige a colisao de indices numericos: os
         # sub-cursos presenciais nao herdam mais os prompts de C3/C4).

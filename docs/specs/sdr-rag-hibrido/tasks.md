@@ -143,34 +143,34 @@ Ref: Spec FR-013; `research.md` Decision 11
 
 Ref: Spec FR-005, FR-006, FR-015; `plan.md` `app/core/flow.py:1641,1830,2046`
 
-- [ ] 5.1.1 Integrar `HybridRetriever.buscar()` no call-site `flow.py:1641`
-- [ ] 5.1.2 Integrar no call-site `flow.py:1830`
-- [ ] 5.1.3 Integrar no call-site `flow.py:2046`
-- [ ] 5.1.4 `abster=True` → retorno direto `_fallback_indisponivel_response(idioma), True` SEM chamar `GroundedResponder.generate()`
-- [ ] 5.1.5 `_load_knowledge_by_slug` monta `knowledge_context` com os chunks recuperados quando `abster=False`; Apresentação/Turmas/Link permanecem verbatim fora do RAG (FR-014)
-- [ ] 5.1.6 Escrever teste de integração (FlowEngine real, mock só `OpenAIClient`) cobrindo os 3 call-sites: abstenção curto-circuita sem chamar `generate()`; recuperação bem-sucedida alimenta `knowledge_context`
+- [x] 5.1.1 Integrar `HybridRetriever.buscar()` no call-site `flow.py:1641` <!-- _handle_sistema_goldincision, ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS -->
+- [x] 5.1.2 Integrar no call-site `flow.py:1830` <!-- _responder_duvida_online -->
+- [x] 5.1.3 Integrar no call-site `flow.py:2046` <!-- _responder_duvida_presencial -->
+- [x] 5.1.4 `abster=True` → retorno direto `_fallback_indisponivel_response(idioma), True` SEM chamar `GroundedResponder.generate()`
+- [x] 5.1.5 `_load_knowledge_by_slug` monta `knowledge_context` com os chunks recuperados quando `abster=False`; Apresentação/Turmas/Link permanecem verbatim fora do RAG (FR-014)
+- [x] 5.1.6 Escrever teste de integração (FlowEngine real, mock só `OpenAIClient`) cobrindo os 3 call-sites: abstenção curto-circuita sem chamar `generate()`; recuperação bem-sucedida alimenta `knowledge_context` <!-- tests/test_flow_rag_integration.py -->
 
 ### 5.2 `GroundedResponder.last_fonte_ids` `[A]`
 
 Ref: Spec FR-011; `data-model.md` §3; `plan.md` `app/core/responder.py`
 
-- [ ] 5.2.1 Adicionar atributo `last_fonte_ids: Optional[list[str]]` ao `GroundedResponder.__init__`
-- [ ] 5.2.2 Popular deterministicamente a partir de `chunk.id` dos `chunks_recuperados` passados a `generate()` — NUNCA reportado pelo LLM
-- [ ] 5.2.3 Escrever teste: populado corretamente com chunks; `None` quando `chunks_recuperados` vazio/ausente
+- [x] 5.2.1 Adicionar atributo `last_fonte_ids: Optional[list[str]]` ao `GroundedResponder.__init__`
+- [x] 5.2.2 Popular deterministicamente a partir de `chunk.id` dos `chunks_recuperados` passados a `generate()` — NUNCA reportado pelo LLM
+- [x] 5.2.3 Escrever teste: populado corretamente com chunks; `None` quando `chunks_recuperados` vazio/ausente <!-- tests/test_responder.py -->
 
 ### 5.3 `FidelityGate` valida as mesmas unidades `[C]`
 
 Ref: Spec FR-012; `plan.md` `app/core/fidelity.py` (sem mudança de assinatura)
 
-- [ ] 5.3.1 Confirmar que `FidelityGate.verificar()` recebe o MESMO `knowledge_context` montado a partir dos chunks recuperados (sem mudança de assinatura)
-- [ ] 5.3.2 Escrever teste garantindo que o portão nunca valida contra um conjunto mais amplo/diferente do que efetivamente embasou a resposta
+- [x] 5.3.1 Confirmar que `FidelityGate.verificar()` recebe o MESMO `knowledge_context` montado a partir dos chunks recuperados (sem mudança de assinatura)
+- [x] 5.3.2 Escrever teste garantindo que o portão nunca valida contra um conjunto mais amplo/diferente do que efetivamente embasou a resposta <!-- tests/test_flow_rag_integration.py -->
 
 ### 5.4 Observabilidade aditiva — `fonte_ids` no `log_turno` `[M]`
 
 Ref: Spec FR-018; `data-model.md` §3; `plan.md` `app/observability/log.py`
 
-- [ ] 5.4.1 Registrar `fonte_ids` em `log_turno` de forma aditiva, junto do `veredito_fidelidade` (Onda 2)
-- [ ] 5.4.2 Escrever teste confirmando que o campo novo é aditivo e não quebra parsing/consumo já existente do `log_turno`
+- [x] 5.4.1 Registrar `fonte_ids` em `log_turno` de forma aditiva, junto do `veredito_fidelidade` (Onda 2)
+- [x] 5.4.2 Escrever teste confirmando que o campo novo é aditivo e não quebra parsing/consumo já existente do `log_turno` <!-- tests/test_flow_rag_integration.py -->
 
 ---
 
@@ -180,15 +180,15 @@ Ref: Spec FR-018; `data-model.md` §3; `plan.md` `app/observability/log.py`
 
 Ref: dec-020 (#1 API3 BOPLA, #2 API4/LLM10 Unbounded Consumption); `checklists/requirements.md` CHK034, CHK035
 
-- [ ] 6.1.1 Rodar suíte cobrindo simultaneamente: rejeição de `fonte_tabela`/`fonte_id`/`embedding`/`ativo` client-supplied em `/admin/chunks` (task 3.1.4/3.1.6), rejeição de `tipo` fora de `base` (task 3.1.3/3.1.7), rejeição de `conteudo` >4000 chars (task 3.1.2/3.1.8), particionamento de embeddings em lotes ≤100 (task 2.2.4/2.2.7)
-- [ ] 6.1.2 Confirmar no relatório de execução que nenhum dos 2 findings MEDIUM do gate `owasp-security` (dec-020) permanece sem teste automatizado cobrindo a mitigação
+- [x] 6.1.1 Rodar suíte cobrindo simultaneamente: rejeição de `fonte_tabela`/`fonte_id`/`embedding`/`ativo` client-supplied em `/admin/chunks` (task 3.1.4/3.1.6), rejeição de `tipo` fora de `base` (task 3.1.3/3.1.7), rejeição de `conteudo` >4000 chars (task 3.1.2/3.1.8), particionamento de embeddings em lotes ≤100 (task 2.2.4/2.2.7) <!-- tests/test_admin_chunks.py + tests/test_rag_seed.py, 100% verde -->
+- [x] 6.1.2 Confirmar no relatório de execução que nenhum dos 2 findings MEDIUM do gate `owasp-security` (dec-020) permanece sem teste automatizado cobrindo a mitigação <!-- confirmado: tests/test_admin_chunks.py cobre ambos -->
 
 ### 6.2 Confirmar pin de versão pgvector `[M]`
 
 Ref: dec-020 finding #3 (LOW, A03 Supply Chain Failures)
 
-- [ ] 6.2.1 Confirmar `"pgvector>=0.3.0"` (task 1.2.4) pinado em `pyproject.toml`, mesmo padrão de `"sqlalchemy[asyncio]>=2.0.36"`
-- [ ] 6.2.2 Rodar `pip list`/checar lockfile e confirmar ausência de instalação "latest" implícita
+- [x] 6.2.1 Confirmar `"pgvector>=0.3.0"` (task 1.2.4) pinado em `pyproject.toml`, mesmo padrão de `"sqlalchemy[asyncio]>=2.0.36"`
+- [x] 6.2.2 Rodar `pip list`/checar lockfile e confirmar ausência de instalação "latest" implícita <!-- pip show pgvector: 0.4.2, satisfaz >=0.3.0, sem pin "latest" -->
 
 ---
 
@@ -198,9 +198,14 @@ Ref: dec-020 finding #3 (LOW, A03 Supply Chain Failures)
 
 Ref: `plan.md` Envs novos; `data-model.md` §4; Spec FR-020
 
-- [ ] 7.1.1 Adicionar os 7 campos em `app/config.py` (`Settings`): `rag_embedding_model`, `rag_limiar_abstencao`, `rag_k_vetorial`, `rag_k_textual`, `rag_top_k`, `rag_retrieval_timeout_seconds`, `rag_cache_enabled`
-- [ ] 7.1.2 Adicionar as 7 envs em `stack.yml` (serviço `sdr-whatsapp`) e `.env.example`, com os defaults de `plan.md`/`data-model.md`
-- [ ] 7.1.3 Escrever teste de config validando defaults + override via env para os 7 novos campos
+- [x] 7.1.1 Adicionar os 7 campos em `app/config.py` (`Settings`): `rag_embedding_model`, `rag_limiar_abstencao`, `rag_k_vetorial`, `rag_k_textual`, `rag_top_k`, `rag_retrieval_timeout_seconds`, `rag_cache_enabled`
+- [x] 7.1.2 Adicionar as 7 envs em `stack.yml` (serviço `sdr-whatsapp`) e `.env.example`, com os defaults de `plan.md`/`data-model.md`
+- [x] 7.1.3 Escrever teste de config validando defaults + override via env para os 7 novos campos <!-- tests/test_config.py -->
+
+Nota: `rag_embedding_model` já existia desde a FASE 2 (task 2.1.1); as demais 6
+envs são novas desta FASE. `HybridRetriever` passou a ser instanciado em
+`app/api/webhook.py` com esses 7 settings (em vez dos defaults hardcoded da
+FASE 4).
 
 ---
 
@@ -210,15 +215,15 @@ Ref: `plan.md` Envs novos; `data-model.md` §4; Spec FR-020
 
 Ref: Spec FR-019; `research.md` Decision 5
 
-- [ ] 8.1.1 Implementar reaproveitamento do resultado de busca (Redis) para pergunta idêntica/muito semelhante dentro da mesma conversa, desligado por padrão (`RAG_CACHE_ENABLED=false`)
-- [ ] 8.1.2 Escrever teste confirmando que o cache é opcional (desligado por padrão não altera comportamento) e reduz chamadas repetidas quando ligado
+- [x] 8.1.1 Implementar reaproveitamento do resultado de busca (Redis) para pergunta idêntica/muito semelhante dentro da mesma conversa, desligado por padrão (`RAG_CACHE_ENABLED=false`) <!-- HybridRetriever._cache_get/_cache_set, chave por (query normalizada, curso_id, idioma) -->
+- [x] 8.1.2 Escrever teste confirmando que o cache é opcional (desligado por padrão não altera comportamento) e reduz chamadas repetidas quando ligado <!-- tests/test_rag_cache.py -->
 
 ### 8.2 Suporte à revisão de amostras (US4/FR-022) `[M]`
 
 Ref: Spec FR-022; `plan.md` Consulta direta aos registros (Q4/resolvida)
 
-- [ ] 8.2.1 Confirmar que `fonte_ids` + `abster`/`motivo_abstencao` logados em `log_turno` (task 5.4.1) são suficientes para consulta direta ao banco/logs, sem endpoint admin novo
-- [ ] 8.2.2 Documentar no corpo do PR (task 10.3) a consulta de exemplo usada para revisar uma amostra de turnos passados
+- [x] 8.2.1 Confirmar que `fonte_ids` + `abster`/`motivo_abstencao` logados em `log_turno` (task 5.4.1) são suficientes para consulta direta ao banco/logs, sem endpoint admin novo
+- [x] 8.2.2 Documentar no corpo do PR (task 10.3) a consulta de exemplo usada para revisar uma amostra de turnos passados
 
 ---
 
@@ -228,9 +233,9 @@ Ref: Spec FR-022; `plan.md` Consulta direta aos registros (Q4/resolvida)
 
 Ref: `plan.md` Estratégia de testes; Spec US1/US2 Independent Test
 
-- [ ] 9.1.1 Adicionar casos `@pytest.mark.golden` em `tests/golden/` cobrindo resposta ancorada em chunk específico (groundedness, US1)
-- [ ] 9.1.2 Adicionar casos de abstenção (pergunta fora de escopo da base, sem fonte suficiente, US2)
-- [ ] 9.1.3 Confirmar que o golden set estendido roda fora do CI padrão (mesmo marcador dedicado já existente)
+- [x] 9.1.1 Adicionar casos `@pytest.mark.golden` em `tests/golden/` cobrindo resposta ancorada em chunk específico (groundedness, US1) <!-- tests/golden/casos/rag_hibrido.json -->
+- [x] 9.1.2 Adicionar casos de abstenção (pergunta fora de escopo da base, sem fonte suficiente, US2) <!-- idem, casos rag_c*_abstencao_* -->
+- [x] 9.1.3 Confirmar que o golden set estendido roda fora do CI padrão (mesmo marcador dedicado já existente) <!-- `python3 -m pytest tests/golden -m golden`, addopts = '-m "not golden"' no CI padrão -->
 
 ---
 
@@ -240,17 +245,17 @@ Ref: `plan.md` Estratégia de testes; Spec US1/US2 Independent Test
 
 Ref: Spec FR-016, FR-017; `plan.md` Preservação Ondas 1+2
 
-- [ ] 10.1.1 Rodar suíte completa confirmando que anti-loop `_MAX_TENTATIVAS=3`, `max_msgs_per_turn=4`, `_Pacer`+429, idempotência, lock, gate IA=77, `debounce_seconds=8` (Onda 1) permanecem intactos
-- [ ] 10.1.2 Rodar suíte confirmando que contrato JSON `RespostaEstruturada`, `FidelityGate`, `SlotExtractor` (Onda 2) permanecem intactos, sem fusão com os novos mecanismos
-- [ ] 10.1.3 Escrever/rodar teste de regressão dedicado confirmando 100% de cobertura aprovada das suítes das Ondas 1 e 2
+- [x] 10.1.1 Rodar suíte completa confirmando que anti-loop `_MAX_TENTATIVAS=3`, `max_msgs_per_turn=4`, `_Pacer`+429, idempotência, lock, gate IA=77, `debounce_seconds=8` (Onda 1) permanecem intactos <!-- tests/test_turnos_contadores.py, test_debounce.py, test_locks.py, test_idempotency.py, test_pacer.py etc — 100% verde -->
+- [x] 10.1.2 Rodar suíte confirmando que contrato JSON `RespostaEstruturada`, `FidelityGate`, `SlotExtractor` (Onda 2) permanecem intactos, sem fusão com os novos mecanismos <!-- tests/test_responder.py, test_fidelity.py, test_interpret.py — 100% verde, sem alteracao de assinatura -->
+- [x] 10.1.3 Escrever/rodar teste de regressão dedicado confirmando 100% de cobertura aprovada das suítes das Ondas 1 e 2 <!-- `pytest tests/ -q` (exclui golden): 588 passed, 0 failed -->
 
 ### 10.2 Qualidade final (suíte verde + lint) `[A]`
 
 Ref: `plan.md` Estratégia de testes (RESTRIÇÃO INVIOLÁVEL)
 
-- [ ] 10.2.1 Rodar a suíte completa (unit + integração, FlowEngine real, mock só `OpenAIClient`/`embed()`) e confirmar 100% verde
-- [ ] 10.2.2 Rodar `ruff` e corrigir todos os achados até lint limpo
-- [ ] 10.2.3 Rodar `validate-tasks-template.sh` e `validate-docs-rendered` sobre este `tasks.md` e demais artefatos gerados
+- [x] 10.2.1 Rodar a suíte completa (unit + integração, FlowEngine real, mock só `OpenAIClient`/`embed()`) e confirmar 100% verde <!-- 588 passed + 62 golden passed -->
+- [x] 10.2.2 Rodar `ruff` e corrigir todos os achados até lint limpo <!-- corrigidos os 3 achados pre-existentes em migrations/env.py (import order + unused import) e migrations/versions/ea9e306666b0_initial_schema.py (trailing whitespace); `ruff check .` no repo inteiro: All checks passed -->
+- [x] 10.2.3 Rodar `validate-tasks-template.sh` e `validate-docs-rendered` sobre este `tasks.md` e demais artefatos gerados
 
 ### 10.3 Abertura de PR (sem merge) — inclui pré-condição pgvector `[A]`
 

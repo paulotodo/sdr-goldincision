@@ -1,7 +1,7 @@
 """initial_schema
 
 Revision ID: ea9e306666b0
-Revises: 
+Revises:
 Create Date: 2026-06-28 02:04:54.669196
 
 Schema inicial do sdr-whatsapp (data-model.md).

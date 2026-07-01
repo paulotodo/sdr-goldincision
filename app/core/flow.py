@@ -40,14 +40,13 @@ from app.config import settings
 from app.core.intent import INTENCAO_PARA_CAMINHO, ClassificacaoIntencao, IntentClassifier
 from app.core.interpret import SlotExtractor, permitir_reversao
 from app.core.memory import MemoryManager, SessionContext
-from app.core.responder import GroundedResponder
+from app.core.responder import GroundedResponder, _fallback_indisponivel_response
+from app.core.retrieval import HybridRetriever, ResultadoRecuperacao
 from app.repository.models import (
     Curso,
     CursoApresentacao,
     CursoLink,
-    CursoObjecao,
     CursoTurma,
-    Faq,
 )
 
 logger = logging.getLogger(__name__)
@@ -908,6 +907,7 @@ class FlowResult:
         confianca_slot: Optional[float] = None,
         fidelidade_fiel: Optional[bool] = None,
         fidelidade_afirmacoes_nao_sustentadas: Optional[list] = None,
+        fonte_ids: Optional[list] = None,
     ):
         self.response_text = response_text
         self.action = action
@@ -935,6 +935,12 @@ class FlowResult:
         self.confianca_slot = confianca_slot
         self.fidelidade_fiel = fidelidade_fiel
         self.fidelidade_afirmacoes_nao_sustentadas = fidelidade_afirmacoes_nao_sustentadas
+        # Rastreabilidade aditiva (FASE 5, Onda 3 — FR-011, FR-018): ids dos
+        # chunks (`HybridRetriever`) que embasaram a resposta deste turno,
+        # atribuido POS-HOC por `FlowEngine.process()` a partir de
+        # `GroundedResponder.last_fonte_ids`. None quando RAG nao foi
+        # acionado neste turno (fast-path/verbatim/sem duvida).
+        self.fonte_ids = fonte_ids
 
 
 class FlowEngine:
@@ -955,12 +961,19 @@ class FlowEngine:
         responder: GroundedResponder,
         nidia_phone: str = _NIDIA_DEFAULT,
         slot_extractor: Optional[SlotExtractor] = None,
+        retriever: Optional[HybridRetriever] = None,
     ) -> None:
         self._db = db_session
         self._intent = intent_classifier
         self._memory = memory_manager
         self._responder = responder
         self._nidia_phone = nidia_phone
+        # RAG hibrido (Onda 3, FASE 5 — FR-001..FR-006, FR-011..FR-018).
+        # Opcional (default None = retrocompat com testes legados que nao o
+        # injetam, mesmo padrao de `slot_extractor`/`fidelity_gate`): quando
+        # None, `_load_knowledge_by_slug` NAO tenta recuperacao (sem RAG,
+        # sem abstencao) — producao (`app/api/webhook.py`) SEMPRE injeta um.
+        self._retriever = retriever
         # Pilar 8 (FR-013..FR-018): fallback agentico, opcional (default None =
         # desativado, retrocompat com testes legados que nao o injetam — mesmo
         # padrao de `fidelity_gate` em GroundedResponder). Quando None, os
@@ -1003,6 +1016,7 @@ class FlowEngine:
         if self._responder is not None:
             self._responder.last_fidelidade_fiel = None
             self._responder.last_fidelidade_afirmacoes_nao_sustentadas = None
+            self._responder.last_fonte_ids = None
 
         estado_inatividade = self._aplicar_reengajamento_pre(context)
         result = await self._process_core(ticket_id, user_message, context)
@@ -1020,6 +1034,7 @@ class FlowEngine:
             result.fidelidade_afirmacoes_nao_sustentadas = (
                 self._responder.last_fidelidade_afirmacoes_nao_sustentadas
             )
+            result.fonte_ids = self._responder.last_fonte_ids
         return result
 
     # ------------------------------------------------------------------
@@ -1638,14 +1653,22 @@ class FlowEngine:
                 )
             # Duvida OU objecao (mesmo sem "?") → responder com grounding na Base
             # e no Banco de Objecoes do Licenciamento (nao encaminhar prematuramente).
-            knowledge = await self._load_knowledge_by_slug(_SLUG_LICENCIAMENTO, idioma)
-            history = self._memory.build_messages_for_llm(context, max_msgs=8)
-            resposta, handoff = await self._responder.generate(
-                user_message=user_message, caminho=_SLUG_LICENCIAMENTO,
-                etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
-                session_history=history, session_summary=context.resumo_rolante,
-                idioma=idioma, known_facts=_perfil_conhecido(context),
+            # RAG hibrido (FASE 5, research.md Decision 7): abster=True curto-
+            # circuita ANTES do LLM de redacao (nunca gera texto sem fonte).
+            knowledge, resultado_rag = await self._load_knowledge_by_slug(
+                _SLUG_LICENCIAMENTO, idioma, user_message
             )
+            if resultado_rag.abster:
+                resposta, handoff = _fallback_indisponivel_response(idioma), True
+            else:
+                history = self._memory.build_messages_for_llm(context, max_msgs=8)
+                resposta, handoff = await self._responder.generate(
+                    user_message=user_message, caminho=_SLUG_LICENCIAMENTO,
+                    etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
+                    chunks_recuperados=resultado_rag.chunks,
+                    session_history=history, session_summary=context.resumo_rolante,
+                    idioma=idioma, known_facts=_perfil_conhecido(context),
+                )
             updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
             action = "handoff" if handoff else "continue"
             return FlowResult(
@@ -1823,14 +1846,20 @@ class FlowEngine:
         self, context: SessionContext, user_message: str, updates: dict
     ) -> FlowResult:
         idioma = context.idioma
-        knowledge = await self._load_knowledge_by_slug("curso-online-hg", idioma)
-        history = self._memory.build_messages_for_llm(context, max_msgs=8)
-        resposta, handoff = await self._responder.generate(
-            user_message=user_message, caminho="curso-online-hg",
-            etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
-            session_history=history, session_summary=context.resumo_rolante,
-            idioma=idioma, known_facts=_perfil_conhecido(context),
+        knowledge, resultado_rag = await self._load_knowledge_by_slug(
+            "curso-online-hg", idioma, user_message
         )
+        if resultado_rag.abster:
+            resposta, handoff = _fallback_indisponivel_response(idioma), True
+        else:
+            history = self._memory.build_messages_for_llm(context, max_msgs=8)
+            resposta, handoff = await self._responder.generate(
+                user_message=user_message, caminho="curso-online-hg",
+                etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
+                chunks_recuperados=resultado_rag.chunks,
+                session_history=history, session_summary=context.resumo_rolante,
+                idioma=idioma, known_facts=_perfil_conhecido(context),
+            )
         updates["etapa_mapa_mestre"] = ETAPA_DUVIDAS
         action = "handoff" if handoff else "continue"
         return FlowResult(
@@ -2037,16 +2066,22 @@ class FlowEngine:
     ) -> FlowResult:
         idioma = context.idioma
         cam = CaminhoMapaMestre.CURSOS_PRESENCIAIS
-        knowledge = await self._load_knowledge_by_slug(slug, idioma)
-        history = self._memory.build_messages_for_llm(context, max_msgs=8)
+        knowledge, resultado_rag = await self._load_knowledge_by_slug(
+            slug, idioma, user_message
+        )
         # Despacho por SLUG (corrige o bug de colisao de prompts numericos).
         prompt_key = "trilha-hg" if slug == _SLUG_HG_MODULO_1 else slug
-        resposta, handoff = await self._responder.generate(
-            user_message=user_message, caminho=prompt_key,
-            etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
-            session_history=history, session_summary=context.resumo_rolante,
-            idioma=idioma, known_facts=_perfil_conhecido(context),
-        )
+        if resultado_rag.abster:
+            resposta, handoff = _fallback_indisponivel_response(idioma), True
+        else:
+            history = self._memory.build_messages_for_llm(context, max_msgs=8)
+            resposta, handoff = await self._responder.generate(
+                user_message=user_message, caminho=prompt_key,
+                etapa=ETAPA_DUVIDAS, knowledge_context=knowledge,
+                chunks_recuperados=resultado_rag.chunks,
+                session_history=history, session_summary=context.resumo_rolante,
+                idioma=idioma, known_facts=_perfil_conhecido(context),
+            )
         updates["etapa_mapa_mestre"] = ETAPA_DUVIDAS
         action = "handoff" if handoff else "continue"
         return FlowResult(resposta, action, cam, ETAPA_DUVIDAS, updates)
@@ -2070,11 +2105,15 @@ class FlowEngine:
     # Carregamento de conhecimento do banco
     # ------------------------------------------------------------------
 
-    async def _load_knowledge(self, caminho: int, idioma: str) -> str:
+    async def _load_knowledge(
+        self, caminho: int, idioma: str, user_message: str = ""
+    ) -> tuple[str, ResultadoRecuperacao]:
         slug = _CAMINHO_PARA_SLUG.get(caminho)
         if slug is None:
-            return ""
-        return await self._load_knowledge_by_slug(slug=slug, idioma=idioma)
+            return "", ResultadoRecuperacao()
+        return await self._load_knowledge_by_slug(
+            slug=slug, idioma=idioma, user_message=user_message
+        )
 
     async def _get_curso(self, slug: str) -> Optional[Curso]:
         """Busca o Curso ativo pelo slug (ponto unico de acesso — DRY)."""
@@ -2115,15 +2154,31 @@ class FlowEngine:
         link = await self._scalar_idioma(CursoLink, curso.id, idioma)
         return link.url if link else None
 
-    async def _load_knowledge_by_slug(self, slug: str, idioma: str) -> str:
+    async def _load_knowledge_by_slug(
+        self, slug: str, idioma: str, user_message: str = ""
+    ) -> tuple[str, ResultadoRecuperacao]:
         """
-        Carrega base de conhecimento do banco para o slug e idioma.
-        Hierarquia: Apresentacao + Objecoes (por idioma) + Turmas + Links + FAQ.
+        Carrega base de conhecimento para o slug e idioma.
+
+        Hierarquia: Apresentacao (verbatim, fora do RAG, FR-014) +
+        `HybridRetriever.buscar()` (Objecoes+FAQ+base, Onda 3/FASE 5,
+        FR-001..FR-006, substitui os antigos SELECTs diretos de
+        `CursoObjecao`/`Faq` sem ranqueamento) + Turmas (verbatim) + Link de
+        inscricao (verbatim).
+
+        Retorna `(knowledge_context, resultado)`. O CHAMADOR MUST checar
+        `resultado.abster` ANTES de usar `knowledge_context`/chamar
+        `GroundedResponder.generate()` — `abster=True` curto-circuita
+        diretamente em `_fallback_indisponivel_response(idioma), True`, SEM
+        chamar o LLM de redacao (research.md Decision 7). Quando
+        `self._retriever` e None (deps nao injetadas — testes legados que
+        nao cobrem RAG) o comportamento e identico ao pre-FASE5 para estas
+        3 secoes: `abster=False`, sem secao de recuperacao.
         """
         curso = await self._get_curso(slug)
         if curso is None:
             logger.warning("flow: curso nao encontrado slug=%s", slug)
-            return ""
+            return "", ResultadoRecuperacao()
 
         sections: list[str] = []
 
@@ -2131,12 +2186,20 @@ class FlowEngine:
         if apres:
             sections.append(f"=== APRESENTACAO OFICIAL ({idioma}) ===\n{apres.texto}")
 
-        objecoes = await self._list_idioma(CursoObjecao, curso.id, idioma)
-        if objecoes:
-            obj_text = "\n".join(
-                f"- Objecao: {o.objecao}\n  Resposta: {o.resposta}" for o in objecoes
-            )
-            sections.append(f"=== BANCO DE OBJECOES OFICIAL ===\n{obj_text}")
+        resultado = ResultadoRecuperacao()
+        if self._retriever is not None:
+            resultado = await self._retriever.buscar(user_message, curso.id, idioma)
+            if resultado.abster:
+                # Sem fonte suficiente (sem_candidatos/abaixo_limiar/
+                # indisponivel) -> o chamador curto-circuita ANTES do LLM;
+                # o restante do knowledge_context nunca sera usado.
+                return "\n\n".join(sections), resultado
+            if resultado.chunks:
+                chunks_text = "\n\n".join(c.conteudo for c in resultado.chunks)
+                sections.append(
+                    "=== BASE OFICIAL RECUPERADA (objecoes/FAQ/base) ===\n"
+                    f"{chunks_text}"
+                )
 
         stmt_turmas = select(CursoTurma).where(
             CursoTurma.curso_id == curso.id, CursoTurma.ativo.is_(True),
@@ -2154,26 +2217,7 @@ class FlowEngine:
         if link:
             sections.append(f"=== LINK DE INSCRICAO ({idioma}) ===\n{link.url}")
 
-        faq_text = await self._load_faq(idioma)
-        if faq_text:
-            sections.append(
-                "=== FAQ OFICIAL (consultar SOMENTE se a resposta nao estiver "
-                f"nas secoes acima) ===\n{faq_text}"
-            )
-
-        return "\n\n".join(sections)
-
-    async def _load_faq(self, idioma: str) -> str:
-        stmt = select(Faq).where(Faq.ativo.is_(True), Faq.idioma == idioma)
-        result = await self._db.execute(stmt)
-        itens = result.scalars().all()
-        if not itens and idioma != "pt":
-            stmt_pt = select(Faq).where(Faq.ativo.is_(True), Faq.idioma == "pt")
-            result = await self._db.execute(stmt_pt)
-            itens = result.scalars().all()
-        if not itens:
-            return ""
-        return "\n".join(f"- P: {i.pergunta}\n  R: {i.resposta}" for i in itens)
+        return "\n\n".join(sections), resultado
 
     # ------------------------------------------------------------------
     # Helpers de geracao de perguntas padrao (texto fixo — anti-alucinacao)

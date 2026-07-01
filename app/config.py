@@ -155,6 +155,26 @@ class Settings(BaseSettings):
     # Modelo de embeddings usado por OpenAIClient.embed() / app/rag_seed.py
     # (data-model.md §4). 1536 dimensoes (Vector(1536) em app.repository.models.Chunk).
     rag_embedding_model: str = "text-embedding-3-small"
+    # Patamar minimo de score_combinado para NAO abster (FR-005; data-model.md
+    # §4). Calibravel — processo interino documentado em
+    # checklists/requirements.md CHK008.
+    rag_limiar_abstencao: float = 0.45
+    # Candidatos avaliados por busca vetorial (HNSW, cosine) antes da fusao RRF.
+    rag_k_vetorial: int = 20
+    # Candidatos avaliados por busca textual (GIN, tsquery) antes da fusao RRF.
+    rag_k_textual: int = 20
+    # Tamanho do conjunto final (top-N por score_combinado desc) usado no
+    # grounding (FR-004).
+    rag_top_k: int = 5
+    # Timeout duro do HybridRetriever.buscar() (FR-021, research.md Decision
+    # 6): estoura -> abster=True, motivo_abstencao="indisponivel" (mesmo
+    # padrao de `verify_timeout_seconds`).
+    rag_retrieval_timeout_seconds: float = 3.0
+    # Cache semantico opcional (FASE 8, FR-019 — SHOULD): reaproveita o
+    # RESULTADO da busca (nao a resposta final) para consulta identica/
+    # normalizada, desligado por padrao (nunca altera comportamento quando
+    # False).
+    rag_cache_enabled: bool = False
 
     @field_validator("database_url")
     @classmethod

@@ -165,11 +165,15 @@ class StubFlowEngine(FlowEngine):
     async def _load_curso_link(self, slug: str, idioma: str):
         return self._link.get((slug, idioma)) or self._link.get((slug, "pt"))
 
-    async def _load_knowledge_by_slug(self, slug: str, idioma: str) -> str:
-        return self._knowledge
+    async def _load_knowledge_by_slug(self, slug: str, idioma: str, user_message: str = ""):
+        from app.core.retrieval import ResultadoRecuperacao
 
-    async def _load_knowledge(self, caminho: int, idioma: str) -> str:
-        return self._knowledge
+        return self._knowledge, ResultadoRecuperacao()
+
+    async def _load_knowledge(self, caminho: int, idioma: str, user_message: str = ""):
+        from app.core.retrieval import ResultadoRecuperacao
+
+        return self._knowledge, ResultadoRecuperacao()
 
     async def _load_faq(self, idioma: str) -> str:
         return ""

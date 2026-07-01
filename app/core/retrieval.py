@@ -35,9 +35,11 @@ Postgres+pgvector em producao/integracao.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Protocol
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -202,6 +204,17 @@ class SqlAlchemyChunkRepository:
         ]
 
 
+def _cache_key(query: str, curso_id: Optional[int], idioma: str) -> str:
+    """Chave do cache semantico opcional (FASE 8): normaliza a consulta
+    (trim + lowercase + colapso de espacos) e faz hash — consulta
+    identica/normalizada para o MESMO `curso_id`/`idioma` reaproveita o
+    resultado (escopo minimo: cache por consulta, `research.md` Escopo
+    Coberto/Excluido)."""
+    normalizado = " ".join(query.strip().lower().split())
+    digest = hashlib.sha256(normalizado.encode("utf-8")).hexdigest()
+    return f"rag_cache:{curso_id}:{idioma}:{digest}"
+
+
 def _aplicar_pre_filtro(
     candidatos: list[ChunkCandidato],
     curso_id: Optional[int],
@@ -307,6 +320,9 @@ class HybridRetriever:
         timeout_seconds: float = 3.0,
         peso_vetorial: float = 0.6,
         peso_textual: float = 0.4,
+        redis_client: Optional[Any] = None,
+        cache_enabled: bool = False,
+        cache_ttl_seconds: int = 300,
     ) -> None:
         self._repo = chunk_repository
         self._openai_client = openai_client
@@ -317,6 +333,15 @@ class HybridRetriever:
         self._timeout_seconds = timeout_seconds
         self._peso_vetorial = peso_vetorial
         self._peso_textual = peso_textual
+        # Cache semantico opcional (FASE 8, FR-019 — SHOULD), desligado por
+        # padrao (`RAG_CACHE_ENABLED=false`). Reaproveita o RESULTADO da
+        # busca (nao a resposta final) para consulta identica/normalizada —
+        # `research.md` escopo minimo (Escopo Excluido: cache de resposta
+        # completa fica fora desta entrega). Cache best-effort: qualquer
+        # falha de Redis (GET/SET) NUNCA vira abstencao — apenas um miss.
+        self._redis_client = redis_client
+        self._cache_enabled = cache_enabled
+        self._cache_ttl_seconds = cache_ttl_seconds
 
     async def buscar(
         self,
@@ -337,9 +362,23 @@ class HybridRetriever:
         retorna `ResultadoRecuperacao(abster=True,
         motivo_abstencao="indisponivel")`, nunca propaga a excecao ao
         chamador.
+
+        Cache semantico opcional (FASE 8): quando `cache_enabled=True` e um
+        `redis_client` foi injetado, tenta reaproveitar o resultado de uma
+        consulta identica (apos normalizacao) para o mesmo `curso_id`/
+        `idioma` antes de rodar a busca completa. Falha de cache (Redis
+        indisponivel/corrompido) e sempre tratada como cache MISS — nunca
+        como abstencao (a busca completa prossegue normalmente).
         """
+        cache_key: Optional[str] = None
+        if self._cache_enabled and self._redis_client is not None:
+            cache_key = _cache_key(query, curso_id, idioma)
+            cached = await self._cache_get(cache_key)
+            if cached is not None:
+                return cached
+
         try:
-            return await asyncio.wait_for(
+            resultado = await asyncio.wait_for(
                 self._buscar_interno(query, curso_id, idioma),
                 timeout=self._timeout_seconds,
             )
@@ -354,6 +393,45 @@ class HybridRetriever:
                 exc,
             )
             return ResultadoRecuperacao(abster=True, motivo_abstencao="indisponivel")
+
+        if cache_key is not None:
+            await self._cache_set(cache_key, resultado)
+        return resultado
+
+    async def _cache_get(self, key: str) -> Optional[ResultadoRecuperacao]:
+        """Best-effort: qualquer falha (Redis indisponivel, payload
+        corrompido) e tratada como cache MISS — nunca propaga excecao nem
+        vira abstencao (FR-019 e SHOULD/opcional, nunca pode degradar a
+        confiabilidade do mecanismo principal)."""
+        try:
+            raw = await self._redis_client.get(key)
+            if raw is None:
+                return None
+            data = json.loads(raw)
+            chunks = [ChunkRecuperado(**c) for c in data["chunks"]]
+            return ResultadoRecuperacao(
+                chunks=chunks,
+                abster=data["abster"],
+                motivo_abstencao=data["motivo_abstencao"],
+            )
+        except Exception as exc:
+            logger.warning("retrieval: cache GET falhou (tratado como miss): %s", exc)
+            return None
+
+    async def _cache_set(self, key: str, resultado: ResultadoRecuperacao) -> None:
+        """Best-effort: falha ao gravar o cache nunca propaga (nao afeta o
+        resultado ja computado, que e retornado normalmente pelo chamador)."""
+        try:
+            payload = json.dumps(
+                {
+                    "chunks": [asdict(c) for c in resultado.chunks],
+                    "abster": resultado.abster,
+                    "motivo_abstencao": resultado.motivo_abstencao,
+                }
+            )
+            await self._redis_client.set(key, payload, ex=self._cache_ttl_seconds)
+        except Exception as exc:
+            logger.warning("retrieval: cache SET falhou (ignorado): %s", exc)
 
     async def _buscar_interno(
         self,

@@ -333,7 +333,7 @@ class ChatMasterClient:
 
     async def send_message_blocks(
         self, number: str, text: str, idioma: str = "pt"
-    ) -> None:
+    ) -> int:
         """
         Divide texto em blocos curtos e envia cada um em ordem, com pacing.
 
@@ -345,10 +345,13 @@ class ChatMasterClient:
         preservar a ordem de entrega no WhatsApp; o _Pacer garante o intervalo
         minimo global da Meta/BSP.
         Apresentacoes verbatim (FR-010): texto nunca e reescrito, apenas fragmentado.
+
+        Retorna o numero de blocos efetivamente enviados (0 se texto vazio) —
+        usado por `log_turno.n_blocos_enviados` (US5/FR-015).
         """
         blocks = _split_into_blocks(text)
         if not blocks:
-            return
+            return 0
 
         cap = self._max_msgs_per_turn
         if cap and len(blocks) > cap:
@@ -360,6 +363,8 @@ class ChatMasterClient:
             await self.send_message(number, block)
             if i < len(blocks) - 1 and self._inter_block_delay > 0:
                 await asyncio.sleep(self._inter_block_delay)
+
+        return len(blocks)
 
     # ------------------------------------------------------------------
     # Handoff de ticket (FR-022/023/024)

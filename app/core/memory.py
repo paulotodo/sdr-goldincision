@@ -73,6 +73,10 @@ class SessionContext:
     # Perfil livre/incremental do lead (Contato.perfil — JSONB): caracteristicas e
     # preferencias arbitrarias alem da qualificacao fixa, acumuladas entre tickets.
     perfil: dict = field(default_factory=dict)
+    # Intencao classificada no turno corrente (ClassificacaoIntencao.value),
+    # mutada por FlowEngine.process (US5/FR-015 — observabilidade de turno).
+    # Transiente: nao persistida, apenas para o evento log_turno do turno atual.
+    ultima_intencao: Optional[str] = None
 
 
 class MemoryManager:

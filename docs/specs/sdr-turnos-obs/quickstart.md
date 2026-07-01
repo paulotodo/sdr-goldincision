@@ -92,6 +92,12 @@ conforme a suíte existente). Não mockar o motor.
    que re-pergunta slot preenchido falha; um caso fora da Base que responde
    com preço inventado falha.
 
+**Nota (CHK011 / research.md Decision 9)**: nesta Onda 1 o relatório do
+golden set é **informativo** — não há patamar mínimo de taxa de acerto que
+bloqueie merge/CI. Um threshold por dimensão pode ser adicionado depois,
+como mudança isolada, quando houver histórico de execuções suficiente para
+calibrá-lo.
+
 ## Verificação global
 
 - `python3 -m pytest -q` → suíte inteira verde (~320 + novos testes).

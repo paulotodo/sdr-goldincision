@@ -418,6 +418,9 @@ preço inventado), sem depender de execução manual.
 - **SC-008**: O conjunto de regressão de jornada (30 a 50 casos) é
   executável sob demanda e reporta taxa de acerto por dimensão avaliada,
   sem exigir execução manual via WhatsApp para cada validação de mudança.
+  *Clarificação (não mudança de escopo — research.md Decision 9 / CHK011):*
+  nesta Onda 1 o relatório é informativo, sem patamar mínimo bloqueante de
+  taxa de acerto.
 - **SC-009**: Todos os mecanismos de controle pré-existentes (verificados
   na avaliação de linha de base) continuam funcionando sem regressão após
   a introdução desta feature.

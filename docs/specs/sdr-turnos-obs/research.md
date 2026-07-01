@@ -180,3 +180,37 @@ design evita retrabalho no gate owasp.
 - Logar payload bruto do turno → vaza PII/secrets; rejeitado.
 - Fail-closed na inatividade → uma leitura corrompida derrubaria a sessão;
   viola Princípio IV.
+
+## Decision 9: Limiar de aceitação do golden set (CHK011)
+
+**Decision**: Nesta rodada (Onda 1), o golden set (Decision 7) é
+**informativo** — o harness agrega e imprime a taxa de acerto por dimensão
+(fluxo correto, abstenção correta, zero preço inventado), mas **não define
+um patamar mínimo bloqueante**. Não há threshold numérico de SC-008 nesta
+feature; a suíte permanece marcada `@pytest.mark.golden` e excluída do gate
+de CI obrigatório (conforme já previsto em spec.md/Decision 7 — "não
+bloquear CI se instável"). É o default conservador quando a decisão do dono
+do produto está indisponível (task 1.2.1).
+
+**Rationale**: CHK011 aponta que SC-008 não define patamar mínimo de taxa de
+acerto. Definir um threshold bloqueante sem dados históricos de execução
+arriscaria (a) falsos-negativos travando o merge por instabilidade de casos
+derivados de conversas reais, ou (b) um número arbitrário sem lastro
+empírico. Manter informativo nesta rodada é reversível e barato: uma vez que
+o golden set rodar algumas vezes em produção/CI manual, um threshold por
+dimensão pode ser adicionado como mudança isolada (nova feature ou fast-
+follow), sem impacto em código de produção.
+
+**Alternatives considered**:
+- Threshold mínimo por dimensão nesta rodada (ex.: >=90% fluxo correto,
+  100% zero-preço-inventado) → rejeitado por falta de dado histórico para
+  calibrar o número; risco de CI instável logo na primeira adoção.
+- Sem qualquer relatório agregado → rejeitado; perde-se visibilidade sobre
+  regressão de qualidade de jornada (violaria o propósito de US6).
+
+**Nota de esclarecimento SC-008** (task 1.2.3): a redação original de SC-008
+já previa suíte separada e não-bloqueante — esta decisão apenas explicita
+que, além de não-bloqueante, o critério de aceitação numérico fica
+**adiado** (não é omissão, é escopo consciente desta Onda 1). Nenhuma
+mudança de escopo em spec.md foi necessária; ver nota equivalente também em
+quickstart.md.

@@ -821,6 +821,10 @@ class FlowEngine:
             },
         )
 
+        # Expor a intencao classificada para observabilidade de turno
+        # (US5/FR-015 — webhook.py le context.ultima_intencao apos process()).
+        context.ultima_intencao = intencao.value
+
         # Atualizar idioma se mudou (US5)
         if idioma.value != context.idioma:
             logger.info(

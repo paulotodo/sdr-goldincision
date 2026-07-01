@@ -69,6 +69,13 @@ services:
       # numero_teste (gestao dinamica via admin API /admin/numeros-teste).
       RESET_COMMAND: "${RESET_COMMAND:-#reset}"
       RESET_TEST_NUMBERS: "${RESET_TEST_NUMBERS:-5511967296849,5511941410998}"
+      # Controle de turnos (Pilar 7 — G1-G6).
+      MAX_TURNOS_NO_NO: "${MAX_TURNOS_NO_NO:-6}"
+      MAX_TURNOS_SESSAO: "${MAX_TURNOS_SESSAO:-25}"
+      MAX_TURNOS_DUVIDAS: "${MAX_TURNOS_DUVIDAS:-12}"
+      REENGAJAMENTO_HORAS: "${REENGAJAMENTO_HORAS:-24}"
+      EXPIRA_SESSAO_HORAS: "${EXPIRA_SESSAO_HORAS:-72}"
+      LOCK_TTL_MS: "${LOCK_TTL_MS:-90000}"
       # Pacing / anti-rajada (respeito ao rate limit da WhatsApp Cloud API).
       # Defaults conservadores; ajustar conforme o limite real do ChatMaster/Meta.
       WHATSAPP_MIN_INTERVAL_MS: "${WHATSAPP_MIN_INTERVAL_MS:-1000}"

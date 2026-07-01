@@ -27,16 +27,16 @@ debounce 8s). Fonte: `spec.md`, `plan.md`, `research.md`, `data-model.md`,
 Ref: Spec FR-007, FR-INFRA-01, FR-013; data-model.md §Limiares;
 research.md Decision 1, Decision 4
 
-- [ ] 1.1.1 Adicionar `MAX_TURNOS_NO_NO` (default 6), `MAX_TURNOS_SESSAO`
+- [x] 1.1.1 Adicionar `MAX_TURNOS_NO_NO` (default 6), `MAX_TURNOS_SESSAO`
   (default 25), `MAX_TURNOS_DUVIDAS` (default 12) em `app/config.py`
-- [ ] 1.1.2 Adicionar `REENGAJAMENTO_HORAS` (default 24),
+- [x] 1.1.2 Adicionar `REENGAJAMENTO_HORAS` (default 24),
   `EXPIRA_SESSAO_HORAS` (default 72) em `app/config.py`
-- [ ] 1.1.3 Elevar `LOCK_TTL_MS` para default 90000 (env-driven) em
+- [x] 1.1.3 Elevar `LOCK_TTL_MS` para default 90000 (env-driven) em
   `app/config.py` e `app/core/redis_keys.py`
-- [ ] 1.1.4 Atualizar `.env.example` com os novos envs e valores default
+- [x] 1.1.4 Atualizar `.env.example` com os novos envs e valores default
   documentados
-- [ ] 1.1.5 Atualizar `stack.yml` (Docker Swarm) com os novos envs
-- [ ] 1.1.6 Escrever teste unitário validando que a config carrega os
+- [x] 1.1.5 Atualizar `stack.yml` (Docker Swarm) com os novos envs
+- [x] 1.1.6 Escrever teste unitário validando que a config carrega os
   defaults corretos e aceita override via env
 
 ### 1.2 Fechar gap de checklist CHK011 — limiar de aceitação do golden set `[M]`
@@ -44,13 +44,13 @@ research.md Decision 1, Decision 4
 Ref: checklists/requirements.md CHK011 (Gap: SC-008 não define patamar
 mínimo de taxa de acerto)
 
-- [ ] 1.2.1 Decidir com o dono do produto: golden set informativo (sem
+- [x] 1.2.1 Decidir com o dono do produto: golden set informativo (sem
   threshold bloqueante nesta rodada) ou threshold mínimo por dimensão —
   default conservador se decisão indisponível: **informativo** (não
   bloqueia CI, conforme spec.md já prevê suíte separada instável)
-- [ ] 1.2.2 Documentar a decisão em `research.md` (nova "Decision 9") ou
+- [x] 1.2.2 Documentar a decisão em `research.md` (nova "Decision 9") ou
   nota equivalente em `quickstart.md`
-- [ ] 1.2.3 Se a decisão alterar a redação de SC-008, atualizar `spec.md`
+- [x] 1.2.3 Se a decisão alterar a redação de SC-008, atualizar `spec.md`
   com nota de esclarecimento (clarificação, não mudança de escopo)
 
 ### 1.3 Fechar gap de checklist CHK006 — anti-PII como teste dedicado `[A]`
@@ -58,11 +58,11 @@ mínimo de taxa de acerto)
 Ref: checklists/requirements.md CHK006 (Gap: restrição anti-PII só em
 research.md Decision 8, não testada dedicadamente); Spec FR-020, SEC-LLM-1
 
-- [ ] 1.3.1 Escrever teste dedicado garantindo que `log_turno` nunca
+- [x] 1.3.1 Escrever teste dedicado garantindo que `log_turno` nunca
   inclui conteúdo bruto da mensagem do lead
-- [ ] 1.3.2 Escrever teste dedicado garantindo mascaramento de
+- [x] 1.3.2 Escrever teste dedicado garantindo mascaramento de
   número/telefone via `_mask_number` no evento de turno
-- [ ] 1.3.3 Escrever teste dedicado garantindo que `_scrub` remove chaves
+- [x] 1.3.3 Escrever teste dedicado garantindo que `_scrub` remove chaves
   sensíveis (tokens/keys) do evento de turno antes de `_emit`
 
 ---
@@ -74,15 +74,15 @@ research.md Decision 8, não testada dedicadamente); Spec FR-020, SEC-LLM-1
 Ref: Spec FR-015, FR-016; plan.md Decision 5; data-model.md §Entity
 Registro de Turno; contracts/turno-event.md
 
-- [ ] 2.1.1 Definir `log_turno(...)` reusando `_emit`/`_scrub`/`_mask_number`
+- [x] 2.1.1 Definir `log_turno(...)` reusando `_emit`/`_scrub`/`_mask_number`
   já existentes
-- [ ] 2.1.2 Implementar todos os 12 campos do evento: `event`,
+- [x] 2.1.2 Implementar todos os 12 campos do evento: `event`,
   `chamado_id`, `turno_sessao`, `etapa_entrada`, `etapa_saida`,
   `intencao`, `idioma`, `n_blocos_enviados`, `acao`, `handoff_destino`,
   `duracao_ms`, `tentativas`, `motivo`
-- [ ] 2.1.3 Medir `duracao_ms` com relógio monotônico em torno do
+- [x] 2.1.3 Medir `duracao_ms` com relógio monotônico em torno do
   processamento do turno
-- [ ] 2.1.4 Escrever teste de shape/contrato do evento em
+- [x] 2.1.4 Escrever teste de shape/contrato do evento em
   `test_observability.py` (todos os campos obrigatórios presentes,
   enum `acao` respeitado)
 
@@ -91,15 +91,21 @@ Registro de Turno; contracts/turno-event.md
 Ref: Spec FR-015, FR-016, SC-007; Edge Cases (turno que falha antes de
 completar)
 
-- [ ] 2.2.1 Envolver o processamento do turno em bloco `try/finally` em
-  `app/api/webhook.py`
-- [ ] 2.2.2 No caminho de sucesso, popular `acao`
+- [x] 2.2.1 Envolver o processamento do turno em bloco `try/finally` em
+  `app/api/webhook.py` (aplicado em `_handle_engine`, que concentra o
+  processamento real de 1 turno; `_process_consolidated_messages` apenas
+  adquire o lock e delega — local mais preciso para o try/finally)
+- [x] 2.2.2 No caminho de sucesso, popular `acao`
   (`resposta`\|`nudge`\|`handoff`\|`retomada`\|`sessao_nova`) e emitir
-  `log_turno`
-- [ ] 2.2.3 No caminho de falha (exceção não tratada), emitir evento
+  `log_turno` (nesta fase: `resposta`\|`handoff`, os unicos alcancaveis
+  antes de FASE 3/5 implementarem nudge/retomada/sessao_nova)
+- [x] 2.2.3 No caminho de falha (exceção não tratada), emitir evento
   parcial com `acao="erro"` e os campos disponíveis até o ponto de falha
-- [ ] 2.2.4 Escrever teste garantindo exatamente 1 evento por turno,
-  inclusive em falha simulada (`test_webhook.py`, SC-007)
+- [x] 2.2.4 Escrever teste garantindo exatamente 1 evento por turno,
+  inclusive em falha simulada (implementado em `test_integration_e2e.py`,
+  junto da classe `TestF8WebhookEngineWired` que já exercita
+  `_handle_engine` real — mais coerente que duplicar o setup em
+  `test_webhook.py`, SC-007)
 
 ---
 

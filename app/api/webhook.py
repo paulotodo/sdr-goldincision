@@ -20,15 +20,18 @@ from __future__ import annotations
 
 import hmac
 import logging
+import time
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Header, Query, Request, status
 from pydantic import ValidationError
 
 from app.config import settings
+from app.core import redis_keys
 from app.core.debounce import DebounceManager
 from app.core.idempotency import IdempotencyChecker
 from app.core.locks import TicketLock
+from app.observability.log import log_turno
 from app.schemas.webhook import WebhookPayload
 
 logger = logging.getLogger(__name__)
@@ -46,6 +49,30 @@ def _get_redis():
     """Obtem cliente Redis do estado da aplicacao (injetado no lifespan)."""
     from app.main import get_redis_client  # importacao tardia para evitar circular
     return get_redis_client()
+
+
+async def _bump_turnos_sessao(chamado_id: int) -> int:
+    """
+    Incrementa `turnos_sessao` no hash `estado:{chamadoId}` (HINCRBY) e
+    retorna o novo valor. Base do orcamento de turnos (US1, FASE 3) e do
+    campo `turno_sessao` do evento de observabilidade (US5, FR-015).
+
+    Fail-open (Edge Case: perda de contadores em restart do Redis / erro de
+    conexao) — nunca derruba o turno; retorna 0 (tratado como turno nao
+    contabilizado, e nao como turno zero real).
+    """
+    try:
+        redis = _get_redis()
+        key = redis_keys.estado_key(chamado_id)
+        val = await redis.hincrby(key, "turnos_sessao", 1)
+        return int(val)
+    except Exception:
+        logger.warning(
+            "webhook: falha ao incrementar turnos_sessao chamado_id=%s",
+            chamado_id,
+            exc_info=True,
+        )
+        return 0
 
 
 async def _handle_reset(chamado_id: int, sender: Optional[str]) -> None:
@@ -130,13 +157,21 @@ async def _handle_engine(
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.config import settings as cfg
-    from app.core.flow import FlowEngine
+    from app.core.flow import FlowEngine, _tent_count
     from app.core.intent import IntentClassifier
     from app.core.memory import MemoryManager
     from app.core.responder import GroundedResponder
     from app.integrations.chatmaster import make_chatmaster_client
     from app.integrations.openai_client import OpenAIClient
     from app.repository.models import Contato, Ticket
+
+    # Observabilidade de turno (US5, FR-015/FR-016): 1 evento por turno
+    # processado, inclusive em falha (via finally). "emit" so vira True apos
+    # o contexto ser carregado — turnos filtrados antes disso (ticket ja em
+    # handoff/encerrado) seguem o mesmo padrao dos demais filtros de webhook
+    # (fromMe/isGroup/gate de fila), sem evento dedicado.
+    _turno_evt: dict = {"emit": False}
+    _turno_t0 = time.monotonic()
 
     async with session_factory() as db_session:
         try:
@@ -222,6 +257,11 @@ async def _handle_engine(
             # Carregar contexto da sessao (DB + Redis)
             context = await memory_manager.load_context(chamado_id)
 
+            # A partir daqui o turno esta de fato sendo processado —
+            # garantir 1 evento de observabilidade (sucesso ou erro).
+            _turno_evt["emit"] = True
+            _turno_evt["etapa_entrada"] = context.etapa or ""
+
             # Processar com o motor conversacional
             flow_result = await engine.process(context.ticket_id, user_message, context)
 
@@ -231,6 +271,18 @@ async def _handle_engine(
                 flow_result.action,
                 flow_result.caminho,
                 flow_result.etapa,
+            )
+
+            _turno_evt["etapa_saida"] = flow_result.etapa or _turno_evt["etapa_entrada"]
+            _turno_evt["idioma"] = context.idioma
+            _turno_evt["intencao"] = context.ultima_intencao
+            _turno_evt["acao"] = "handoff" if flow_result.action == "handoff" else "resposta"
+            _turno_evt["handoff_destino"] = (
+                flow_result.handoff_destino if flow_result.action == "handoff" else None
+            )
+            # Melhor esforco: contador anti-loop da etapa de saida (nao gateia nada).
+            _turno_evt["tentativas"] = (
+                _tent_count(context, flow_result.etapa) if flow_result.etapa else 0
             )
 
             # ---------------------------------------------------------------
@@ -274,7 +326,7 @@ async def _handle_engine(
             if sender and flow_result.response_text:
                 if cfg.chatmaster_token:
                     async with make_chatmaster_client(cfg) as cm_client:
-                        await cm_client.send_message_blocks(
+                        _turno_evt["n_blocos_enviados"] = await cm_client.send_message_blocks(
                             str(sender),
                             flow_result.response_text,
                             idioma=context.idioma,
@@ -312,6 +364,33 @@ async def _handle_engine(
                 "webhook: erro no pipeline chamado_id=%s — rollback", chamado_id
             )
             await db_session.rollback()
+            if _turno_evt.get("emit"):
+                _turno_evt["acao"] = "erro"
+
+        finally:
+            # Garante exatamente 1 evento por turno processado (SC-007),
+            # inclusive quando a excecao acima interrompeu o fluxo (FR-016).
+            if _turno_evt.get("emit"):
+                _turno_sessao_val = await _bump_turnos_sessao(chamado_id)
+                _duracao_ms = int((time.monotonic() - _turno_t0) * 1000)
+                log_turno(
+                    chamado_id=chamado_id,
+                    turno_sessao=_turno_sessao_val,
+                    etapa_entrada=_turno_evt.get("etapa_entrada") or "",
+                    etapa_saida=(
+                        _turno_evt.get("etapa_saida")
+                        or _turno_evt.get("etapa_entrada")
+                        or ""
+                    ),
+                    idioma=_turno_evt.get("idioma") or "pt",
+                    n_blocos_enviados=_turno_evt.get("n_blocos_enviados", 0),
+                    acao=_turno_evt.get("acao", "erro"),
+                    duracao_ms=_duracao_ms,
+                    tentativas=_turno_evt.get("tentativas", 0),
+                    intencao=_turno_evt.get("intencao"),
+                    handoff_destino=_turno_evt.get("handoff_destino"),
+                    motivo=_turno_evt.get("motivo"),
+                )
 
 
 async def _process_consolidated_messages(

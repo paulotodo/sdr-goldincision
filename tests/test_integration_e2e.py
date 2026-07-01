@@ -1254,6 +1254,133 @@ class TestF8WebhookEngineWired:
         )
         assert process_calls[0]["chamado_id"] == 900097
 
+    @pytest.mark.asyncio
+    async def test_handle_engine_emite_exatamente_1_evento_de_turno_sucesso(self):
+        """
+        US5/FR-015/SC-007 (task 2.2.4): um turno processado com sucesso
+        emite EXATAMENTE 1 evento log_turno, com acao='resposta'.
+        """
+        from app.api.webhook import _handle_engine
+        from app.core.flow import FlowResult
+        from app.core.memory import SessionContext
+
+        fake_result = FlowResult(
+            response_text="Ola! Como posso ajudar?",
+            action="continue",
+            caminho=None,
+            etapa="menu",
+            updates={"idioma": "pt"},
+        )
+
+        async def spy_process(self_engine, ticket_id, user_message, context):
+            return fake_result
+
+        mock_db_session = AsyncMock()
+        mock_db_session.execute.return_value.scalar_one.side_effect = [10, "aberto"]
+        mock_db_session.flush = AsyncMock()
+        mock_db_session.commit = AsyncMock()
+        mock_db_session.rollback = AsyncMock()
+        mock_db_session.__aenter__ = AsyncMock(return_value=mock_db_session)
+        mock_db_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_factory = MagicMock(return_value=mock_db_session)
+
+        mock_context = SessionContext(
+            ticket_id=1, chamado_id=900199, contato_id=10,
+            caminho=None, etapa=None, idioma="pt",
+        )
+
+        messages_payload = [
+            {
+                "chamadoId": 900199,
+                "sender": "5511999990199",
+                "nome": "Lead Turno",
+                "mensagem": [{"type": "text", "text": "Ola, quero saber sobre cursos"}],
+                "ticketStatus": "open",
+                "ticketData": None,
+                "queueId": 78,
+            }
+        ]
+
+        with (
+            patch("app.main.get_session_factory", return_value=mock_session_factory),
+            patch("app.api.webhook._get_redis", return_value=MagicMock()),
+            patch("app.core.flow.FlowEngine.process", spy_process),
+            patch("app.core.memory.MemoryManager.load_context", AsyncMock(return_value=mock_context)),
+            patch("app.core.memory.MemoryManager.update_qualification_variables", AsyncMock()),
+            patch("app.core.memory.MemoryManager.update_ticket_state", AsyncMock()),
+            patch("app.core.memory.MemoryManager.save_message", AsyncMock()),
+            patch("app.integrations.openai_client.OpenAIClient.__init__", return_value=None),
+            patch("app.integrations.chatmaster.make_chatmaster_client"),
+            patch("app.core.intent.IntentClassifier.__init__", return_value=None),
+            patch("app.core.responder.GroundedResponder.__init__", return_value=None),
+            patch("app.api.webhook.log_turno") as mock_log_turno,
+        ):
+            await _handle_engine(900199, messages_payload)
+
+        mock_log_turno.assert_called_once()
+        kwargs = mock_log_turno.call_args.kwargs
+        assert kwargs["chamado_id"] == 900199
+        assert kwargs["acao"] == "resposta"
+        assert kwargs["etapa_saida"] == "menu"
+
+    @pytest.mark.asyncio
+    async def test_handle_engine_emite_1_evento_com_acao_erro_em_falha(self):
+        """
+        FR-016/SC-007 (task 2.2.3/2.2.4): turno que lanca excecao no meio do
+        processamento AINDA emite exatamente 1 evento, com acao='erro'
+        (via finally em webhook.py).
+        """
+        from app.api.webhook import _handle_engine
+        from app.core.memory import SessionContext
+
+        async def spy_process_falha(self_engine, ticket_id, user_message, context):
+            raise RuntimeError("falha simulada no motor")
+
+        mock_db_session = AsyncMock()
+        mock_db_session.execute.return_value.scalar_one.side_effect = [10, "aberto"]
+        mock_db_session.flush = AsyncMock()
+        mock_db_session.commit = AsyncMock()
+        mock_db_session.rollback = AsyncMock()
+        mock_db_session.__aenter__ = AsyncMock(return_value=mock_db_session)
+        mock_db_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_factory = MagicMock(return_value=mock_db_session)
+
+        mock_context = SessionContext(
+            ticket_id=1, chamado_id=900198, contato_id=10,
+            caminho=None, etapa="APRESENTACAO_CURSO", idioma="pt",
+        )
+
+        messages_payload = [
+            {
+                "chamadoId": 900198,
+                "sender": "5511999990198",
+                "nome": "Lead Falha",
+                "mensagem": [{"type": "text", "text": "Ola"}],
+                "ticketStatus": "open",
+                "ticketData": None,
+                "queueId": 78,
+            }
+        ]
+
+        with (
+            patch("app.main.get_session_factory", return_value=mock_session_factory),
+            patch("app.api.webhook._get_redis", return_value=MagicMock()),
+            patch("app.core.flow.FlowEngine.process", spy_process_falha),
+            patch("app.core.memory.MemoryManager.load_context", AsyncMock(return_value=mock_context)),
+            patch("app.integrations.openai_client.OpenAIClient.__init__", return_value=None),
+            patch("app.core.intent.IntentClassifier.__init__", return_value=None),
+            patch("app.core.responder.GroundedResponder.__init__", return_value=None),
+            patch("app.api.webhook.log_turno") as mock_log_turno,
+        ):
+            # Nao deve propagar excecao (pipeline e defensivo — rollback + log)
+            await _handle_engine(900198, messages_payload)
+
+        mock_log_turno.assert_called_once()
+        kwargs = mock_log_turno.call_args.kwargs
+        assert kwargs["chamado_id"] == 900198
+        assert kwargs["acao"] == "erro"
+        assert kwargs["etapa_entrada"] == "APRESENTACAO_CURSO"
+
 
 # ===========================================================================
 # Gate por fila — agente atende SO na fila da IA (settings.ai_queue_id=77)

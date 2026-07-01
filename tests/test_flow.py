@@ -74,6 +74,8 @@ def make_context(
     produto_interesse: Optional[str] = None,
     etapa_funil: Optional[str] = None,
     nome: Optional[str] = "Paulo",
+    turnos_sessao: int = 0,
+    turnos_no_no: int = 0,
 ) -> SessionContext:
     return SessionContext(
         ticket_id=1,
@@ -91,6 +93,8 @@ def make_context(
         sessao_id=100,
         nome=nome,
         etapa_funil=etapa_funil,
+        turnos_sessao=turnos_sessao,
+        turnos_no_no=turnos_no_no,
     )
 
 
@@ -877,3 +881,186 @@ async def test_c3_licenciamento_objecao_vai_ao_llm_nao_handoff():
     assert r.action == "continue"
     assert r.response_text == "resposta de objeção"
     assert len(resp.generate_calls) == 1
+
+
+# ===========================================================================
+# Orcamento de turnos (US1, FASE 3 — FR-001 a FR-007)
+# ===========================================================================
+
+from app.config import settings as _cfg  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_turnos_abaixo_do_teto_de_no_nao_dispara_nudge():
+    """Acceptance Scenario 1, US1: contador abaixo do teto -> segue normal,
+    sem intervencao (sem nudge anexado a resposta)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(
+        caminho=1, etapa=ETAPA_QUALIF_MEDICO,
+        turnos_no_no=_cfg.max_turnos_no_no - 1,
+    )
+    r = await eng.process(1, "sim", ctx)
+    assert r.action == "continue"
+    assert r.turno_acao is None
+    assert r.motivo is None
+
+
+@pytest.mark.asyncio
+async def test_turnos_no_teto_de_no_dispara_nudge_sem_handoff():
+    """Acceptance Scenario 2, US1 (task 3.2.3): teto de turnos-no-no atingido
+    -> nudge cordial anexado, SEM encerrar o atendimento (action continua
+    'continue', nao vira handoff)."""
+    resp = MockResponder(response_text="resposta normal")
+    eng = engine(ClassificacaoIntencao.AMBIGUA, responder=resp)
+    ctx = make_context(
+        caminho=1, etapa=ETAPA_QUALIF_MEDICO,
+        turnos_no_no=_cfg.max_turnos_no_no,
+    )
+    r = await eng.process(1, "sim", ctx)
+    assert r.action == "continue"
+    assert r.turno_acao == "nudge"
+    assert r.motivo == "turnos_no_no"
+    # Nudge e ANEXADO — nao substitui a resposta normal do fluxo.
+    assert len(r.response_text) > 0
+
+
+@pytest.mark.asyncio
+async def test_turnos_duvidas_abaixo_do_teto_elevado_nao_dispara_nudge():
+    """Acceptance Scenario 4, US1 (task 3.2.4): etapa de duvidas abertas
+    tolera mais turnos (limiar elevado) antes de sugerir especialista —
+    acima do teto generico de no mas abaixo do teto elevado de duvidas,
+    NENHUM nudge e disparado."""
+    assert _cfg.max_turnos_no_no < _cfg.max_turnos_duvidas, (
+        "pre-condicao do cenario: limiar de duvidas deve ser maior"
+    )
+    resp = MockResponder(response_text="resposta de duvida")
+    eng = engine(ClassificacaoIntencao.AMBIGUA, responder=resp)
+    ctx = make_context(
+        caminho=1, etapa=ETAPA_DUVIDAS, eh_medico=True,
+        turnos_no_no=_cfg.max_turnos_no_no + 1,  # acima do teto generico
+    )
+    r = await eng.process(1, "ainda tenho uma duvida sobre o curso", ctx)
+    assert r.action == "continue"
+    assert r.turno_acao is None
+    assert r.response_text == "resposta de duvida"
+
+
+@pytest.mark.asyncio
+async def test_turnos_duvidas_no_teto_elevado_dispara_nudge():
+    """Complemento do cenario 4: no teto ELEVADO de duvidas, o nudge passa a
+    disparar (o limiar diferenciado nao e infinito)."""
+    resp = MockResponder(response_text="resposta de duvida")
+    eng = engine(ClassificacaoIntencao.AMBIGUA, responder=resp)
+    ctx = make_context(
+        caminho=1, etapa=ETAPA_DUVIDAS, eh_medico=True,
+        turnos_no_no=_cfg.max_turnos_duvidas,
+    )
+    r = await eng.process(1, "ainda tenho duvida", ctx)
+    assert r.action == "continue"
+    assert r.turno_acao == "nudge"
+    assert r.motivo == "turnos_no_no"
+
+
+@pytest.mark.asyncio
+async def test_turnos_teto_de_sessao_dispara_handoff_destino_logico():
+    """Acceptance Scenario 3, US1 (task 3.3.4): teto de turnos-de-sessao
+    atingido -> handoff ao destino LOGICO do caminho corrente (nao ao
+    handoff que o proprio handler emitiria por outro motivo), com motivo
+    de observabilidade registrado."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(
+        caminho=2, etapa=ETAPA_DUVIDAS, eh_medico=True,
+        experiencia_corporal=True, produto_interesse="hg-modulo-1",
+        # C2 (Cursos Presenciais) -> destino logico "presencial"
+        turnos_sessao=_cfg.max_turnos_sessao,
+    )
+    r = await eng.process(1, "qual o valor do investimento?", ctx)
+    assert r.action == "handoff"
+    assert r.handoff_destino == "presencial"
+    assert r.motivo == "turnos_sessao"
+
+
+@pytest.mark.asyncio
+async def test_turnos_colisao_sessao_e_no_prevalece_sessao():
+    """Edge Case item 1 / task 3.3.5: colisao simultanea teto-sessao +
+    teto-no no mesmo turno -> handoff de sessao SEMPRE prevalece sobre o
+    nudge de no (nao emite nudge quando ja e handoff)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(
+        caminho=1, etapa=ETAPA_QUALIF_MEDICO,
+        turnos_sessao=_cfg.max_turnos_sessao,
+        turnos_no_no=_cfg.max_turnos_no_no,
+    )
+    r = await eng.process(1, "sim", ctx)
+    assert r.action == "handoff"
+    assert r.motivo == "turnos_sessao"
+    assert r.turno_acao is None  # nao e nudge — handoff prevaleceu
+
+
+@pytest.mark.asyncio
+async def test_turnos_sessao_handoff_destino_nunca_do_llm():
+    """Task 3.3.6: handoff_destino do teto de sessao vem SEMPRE da allowlist
+    estatica `_destino_logico_por_caminho`, nunca de um valor retornado pelo
+    responder/LLM (assert contra a allowlist, nao contra saida do modelo)."""
+    from app.core.flow import (
+        DEST_ESPECIALISTA,
+        DEST_PRESENCIAL,
+        DEST_SUPORTE,
+        _destino_logico_por_caminho,
+    )
+
+    # A allowlist e 100% estatica: mesmo caminho -> sempre o mesmo destino,
+    # independente de qualquer texto/decisao gerada pelo LLM.
+    assert _destino_logico_por_caminho(CaminhoMapaMestre.CURSOS_PRESENCIAIS) == DEST_PRESENCIAL
+    assert _destino_logico_por_caminho(CaminhoMapaMestre.SISTEMA_GOLDINCISION) == DEST_ESPECIALISTA
+    assert _destino_logico_por_caminho(CaminhoMapaMestre.ALUNO_SUPORTE) == DEST_SUPORTE
+    assert _destino_logico_por_caminho(None) == "consultores"
+    assert _destino_logico_por_caminho(999) == "consultores"  # caminho desconhecido -> fallback
+
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(
+        caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS, etapa=ETAPA_DUVIDAS,
+        turnos_sessao=_cfg.max_turnos_sessao,
+    )
+    r = await eng.process(1, "ok", ctx)
+    assert r.action == "handoff"
+    assert r.handoff_destino == DEST_PRESENCIAL
+
+
+@pytest.mark.asyncio
+async def test_turnos_nudge_nao_sobrepoe_handoff_ja_disparado_por_outro_motivo():
+    """Orcamento de turnos NUNCA escalona sobre um resultado que ja e
+    handoff por outro motivo (pedido explicito de humano, Regra 26) — o
+    campo `motivo` do orcamento permanece None nesse caso."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(
+        caminho=1, etapa=ETAPA_DUVIDAS,
+        turnos_sessao=_cfg.max_turnos_sessao,  # tambem no teto — irrelevante aqui
+    )
+    r = await eng.process(1, "quero falar com um atendente", ctx)
+    assert r.action == "handoff"
+    assert r.handoff_motivo == "pedido_humano"
+    # O motivo de OBSERVABILIDADE do orcamento de turnos nao foi setado —
+    # este handoff nao veio do orcamento, veio do pedido explicito.
+    assert r.motivo is None
+
+
+@pytest.mark.asyncio
+async def test_turnos_no_no_ortogonal_ao_contador_anti_loop():
+    """Acceptance Scenario 5, US1 (task 3.1.5): o contador de turnos desta
+    feature e independente do contador anti-loop de tentativas nao
+    reconhecidas (`_tent_count`/`etapa_funil`) — turnos RECONHECIDOS
+    incrementam turnos_no_no sem tocar etapa_funil."""
+    from app.core.flow import _tent_count
+
+    resp = MockResponder(response_text="ok")
+    eng = engine(ClassificacaoIntencao.AMBIGUA, responder=resp)
+    ctx = make_context(
+        caminho=1, etapa=ETAPA_DUVIDAS, eh_medico=True, turnos_no_no=2,
+    )
+    r = await eng.process(1, "pergunta reconhecida", ctx)
+
+    assert r.action == "continue"
+    # Turno reconhecido -> etapa_funil (contador anti-loop) NAO e tocado.
+    assert "etapa_funil" not in r.updates
+    assert _tent_count(ctx, ETAPA_DUVIDAS) == 0

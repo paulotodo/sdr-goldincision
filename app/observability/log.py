@@ -200,6 +200,71 @@ def log_erro(
     _emit(event)
 
 
+# Acoes possiveis do evento de turno (data-model.md §Entity Registro de Turno)
+_TURNO_ACOES = frozenset(
+    {"resposta", "nudge", "handoff", "retomada", "sessao_nova", "erro"}
+)
+
+
+def log_turno(
+    chamado_id: int,
+    turno_sessao: int,
+    etapa_entrada: str,
+    etapa_saida: str,
+    idioma: str,
+    n_blocos_enviados: int,
+    acao: str,
+    duracao_ms: int,
+    tentativas: int,
+    intencao: Optional[str] = None,
+    handoff_destino: Optional[str] = None,
+    motivo: Optional[str] = None,
+) -> None:
+    """
+    Registra evento estruturado de observabilidade de turno (US5, FR-015,
+    FR-016; contracts/turno-event.md; data-model.md §Entity Registro de
+    Turno).
+
+    Emitido exatamente 1x por turno processado, inclusive em falha
+    (acao="erro", via try/finally no chamador — FR-016).
+
+    Seguranca (Decision 8 / CHK006 / SEC-LLM-1):
+    - NUNCA recebe/inclui conteudo bruto da mensagem do lead — apenas
+      metadados (intencao classificada, idioma, contadores, etapas).
+    - `chamado_id` NAO e mascarado aqui (nao e numero de telefone); se um
+      numero/telefone precisar aparecer em algum campo futuro, deve passar
+      por `_mask_number` antes de chegar a esta funcao.
+    - `_scrub` remove chaves sensiveis (tokens/keys) dentro de `_emit`,
+      antes do evento ser impresso.
+    - `handoff_destino`, quando presente, e o destino logico ja resolvido
+      pela configuracao/allowlist (nunca decidido pelo LLM — SEC-LLM-3);
+      esta funcao apenas repassa o valor recebido, nao o gera.
+
+    `acao` deve pertencer a: resposta | nudge | handoff | retomada |
+    sessao_nova | erro.
+    """
+    if acao not in _TURNO_ACOES:
+        logger.warning("log_turno: acao desconhecida %r (aceitas: %s)", acao, sorted(_TURNO_ACOES))
+
+    event: dict = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": "turno",
+        "chamado_id": chamado_id,
+        "turno_sessao": turno_sessao,
+        "etapa_entrada": etapa_entrada,
+        "etapa_saida": etapa_saida,
+        "intencao": intencao,
+        "idioma": idioma,
+        "n_blocos_enviados": n_blocos_enviados,
+        "acao": acao,
+        "handoff_destino": handoff_destino,
+        "duracao_ms": duracao_ms,
+        "tentativas": tentativas,
+        "motivo": motivo,
+    }
+    _emit(event)
+
+
 # Alias de compatibilidade (mantido para nao quebrar chamadas anteriores)
 def log_event(
     tipo: str,

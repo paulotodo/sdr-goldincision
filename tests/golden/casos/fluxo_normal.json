@@ -1,0 +1,173 @@
+{
+  "casos": [
+    {
+      "id": "fluxo_c1_pergunta_preco_direta",
+      "dimensao": "fluxo",
+      "mensagem": "Quanto custa o curso online?",
+      "estado_inicial": {"caminho": 1},
+      "intent": {"intencao": "curso_online", "idioma": "pt"},
+      "responder": {"texto": "O curso custa R$X (conforme a Base).", "handoff": false},
+      "knowledge": "BASE",
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "caminho": 1,
+        "contains": ["R$X"]
+      }
+    },
+    {
+      "id": "fluxo_c1_sem_pergunta_qualifica_medico_primeiro",
+      "dimensao": "fluxo",
+      "mensagem": "quero o curso online",
+      "estado_inicial": {"caminho": 1},
+      "intent": {"intencao": "curso_online", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "qualif_medico",
+        "contains": ["médico"]
+      }
+    },
+    {
+      "id": "fluxo_c1_apresenta_apos_qualificar",
+      "dimensao": "fluxo",
+      "mensagem": "sim, sou médico com CRM ativo",
+      "estado_inicial": {"caminho": 1, "etapa": "qualif_medico"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "apresentacoes": {"curso-online-hg": "APRESENTACAO OFICIAL DO CURSO ONLINE"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "nao_repetir_slot": {"eh_medico": true},
+        "contains": ["APRESENTACAO OFICIAL DO CURSO ONLINE"]
+      }
+    },
+    {
+      "id": "fluxo_c1_fechamento_envia_link",
+      "dimensao": "fluxo",
+      "mensagem": "quero me inscrever, pode enviar o link",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "links": {"curso-online-hg": {"pt": "https://hotmart.com/pt/inscricao"}},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "contains": ["hotmart.com/pt/inscricao"]
+      }
+    },
+    {
+      "id": "fluxo_c2_qualificacao_ate_trilha_modulo1",
+      "dimensao": "fluxo",
+      "mensagem": "clínica geral, não possuo especialidade",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "qualif_especialidade",
+        "eh_medico": true, "experiencia_corporal": false
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "apresentacoes": {
+        "hg-modulo-1": "CONTEUDO_MODULO_1",
+        "hg360-sp": "CONTEUDO_HG360_SP"
+      },
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "contains": ["CONTEUDO_MODULO_1", "CONTEUDO_HG360_SP"]
+      }
+    },
+    {
+      "id": "fluxo_c2_com_experiencia_escolhe_turma",
+      "dimensao": "fluxo",
+      "mensagem": "sim, já atuo com harmonização corporal",
+      "estado_inicial": {"caminho": 2, "etapa": "qualif_experiencia", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "escolha_turma",
+        "contains": ["São Paulo", "Barcelona"]
+      }
+    },
+    {
+      "id": "fluxo_c3_etapa1_explica_e_pergunta_objetivo",
+      "dimensao": "fluxo",
+      "mensagem": "quero saber do sistema GoldIncision",
+      "estado_inicial": {"caminho": 3},
+      "intent": {"intencao": "sistema_goldincision", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "sistema_objetivo",
+        "contains": ["Licenciamento", "Franquia"]
+      }
+    },
+    {
+      "id": "fluxo_c4_submenu_apresentado",
+      "dimensao": "fluxo",
+      "mensagem": "sou aluno e preciso de suporte",
+      "estado_inicial": {"caminho": 4},
+      "intent": {"intencao": "aluno_suporte", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "aluno_menu",
+        "contains": ["Certificado"]
+      }
+    },
+    {
+      "id": "fluxo_c4_encaminhamento_handoff",
+      "dimensao": "fluxo",
+      "mensagem": "2",
+      "estado_inicial": {"caminho": 4, "etapa": "aluno_menu"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "handoff_destino": "suporte"
+      }
+    },
+    {
+      "id": "fluxo_c5_paciente_modelo_end",
+      "dimensao": "fluxo",
+      "mensagem": "quero ser paciente modelo",
+      "estado_inicial": {},
+      "intent": {"intencao": "paciente_modelo", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "end",
+        "etapa": "paciente_modelo",
+        "contains": ["97423"]
+      }
+    },
+    {
+      "id": "fluxo_c6_outro_assunto_handoff",
+      "dimensao": "fluxo",
+      "mensagem": "tenho uma parceria comercial pra propor",
+      "estado_inicial": {},
+      "intent": {"intencao": "outro_assunto", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "handoff_destino": "consultores"
+      }
+    },
+    {
+      "id": "fluxo_nao_repete_medico_ao_trocar_de_caminho",
+      "dimensao": "fluxo",
+      "mensagem": "na verdade quero o curso presencial",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true},
+      "intent": {"intencao": "cursos_presenciais", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "etapa": "qualif_experiencia",
+        "nao_repetir_slot": {"eh_medico": true},
+        "contains": ["Harmonização Corporal"]
+      }
+    },
+    {
+      "id": "fluxo_menu_opcao_numerica_roteia_sem_llm",
+      "dimensao": "fluxo",
+      "mensagem": "3",
+      "estado_inicial": {"caminho": null, "etapa": "menu"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 3,
+        "etapa": "sistema_objetivo"
+      }
+    }
+  ]
+}

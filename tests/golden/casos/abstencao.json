@@ -1,0 +1,128 @@
+{
+  "casos": [
+    {
+      "id": "abstencao_c1_duvida_fora_da_base_pt",
+      "dimensao": "abstencao",
+      "mensagem": "vocês têm programa de bolsa de estudos internacional em criptomoeda?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "Não tenho essa informação disponível agora. Vou encaminhar para nossa equipe.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "etapa": "duvidas",
+        "abster": true,
+        "not_contains": ["R$"]
+      }
+    },
+    {
+      "id": "abstencao_c2_duvida_fora_da_base_pt",
+      "dimensao": "abstencao",
+      "mensagem": "o curso inclui hospedagem em resort 5 estrelas?",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "duvidas", "eh_medico": true,
+        "experiencia_corporal": true, "produto_interesse": "hg360-sp"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "Não tenho essa informação disponível agora. Vou encaminhar para nossa equipe.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "etapa": "duvidas",
+        "abster": true
+      }
+    },
+    {
+      "id": "abstencao_c3_licenciamento_fora_da_base_pt",
+      "dimensao": "abstencao",
+      "mensagem": "vocês financiam em criptomoeda?",
+      "estado_inicial": {"caminho": 3, "etapa": "sistema_licenciamento_duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "Não tenho essa informação disponível agora. Vou encaminhar para nossa equipe.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true
+      }
+    },
+    {
+      "id": "abstencao_c1_duvida_fora_da_base_en",
+      "dimensao": "abstencao",
+      "mensagem": "do you offer an international scholarship program?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true, "idioma": "en"},
+      "intent": {"intencao": "ambigua", "idioma": "en"},
+      "responder": {
+        "texto": "I don't have that information available right now. I'll connect you with our team.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true,
+        "not_contains": ["R$"]
+      }
+    },
+    {
+      "id": "abstencao_c1_duvida_fora_da_base_es",
+      "dimensao": "abstencao",
+      "mensagem": "¿tienen programa de beca internacional?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true, "idioma": "es"},
+      "intent": {"intencao": "ambigua", "idioma": "es"},
+      "responder": {
+        "texto": "No tengo esa información disponible ahora. Voy a conectarte con nuestro equipo.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true
+      }
+    },
+    {
+      "id": "abstencao_c2_duvida_fora_da_base_es",
+      "dimensao": "abstencao",
+      "mensagem": "¿incluye alojamiento en un resort de 5 estrellas?",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "duvidas", "eh_medico": true,
+        "experiencia_corporal": true, "produto_interesse": "hg360-sp", "idioma": "es"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "es"},
+      "responder": {
+        "texto": "No tengo esa información disponible ahora. Voy a conectarte con nuestro equipo.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true
+      }
+    },
+    {
+      "id": "abstencao_c3_licenciamento_fora_da_base_en",
+      "dimensao": "abstencao",
+      "mensagem": "do you finance in cryptocurrency?",
+      "estado_inicial": {
+        "caminho": 3, "etapa": "sistema_licenciamento_duvidas", "eh_medico": true, "idioma": "en"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "en"},
+      "responder": {
+        "texto": "I don't have that information available right now. I'll connect you with our team.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true
+      }
+    }
+  ]
+}

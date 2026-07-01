@@ -90,6 +90,30 @@ class Settings(BaseSettings):
     # --- Debounce ---
     debounce_seconds: int = 8
 
+    # --- Controle de turnos (Pilar 7 — G1-G6) ---
+    # Teto de turnos consecutivos no MESMO no do mapa-mestre antes de emitir
+    # nudge (nao e handoff: apenas reforca a pergunta pendente). Reseta ao
+    # detectar mudanca de etapa_mapa_mestre.
+    max_turnos_no_no: int = 6
+    # Teto de turnos na sessao inteira antes de escalar para handoff cordial
+    # ao destino configurado (nunca decidido pelo LLM — SEC-LLM-3).
+    max_turnos_sessao: int = 25
+    # Limiar de turnos predominantemente classificados como duvida/pergunta
+    # (intent.classify) antes de escalar — ver checklists/requirements.md CHK011.
+    max_turnos_duvidas: int = 12
+    # Janela (horas) apos a qual uma sessao inativa e retomada com mensagem
+    # cordial de reengajamento, sem reiniciar a jornada do zero.
+    reengajamento_horas: int = 24
+    # Janela (horas) apos a qual a sessao e tratada como NOVA, preservando o
+    # perfil ja conhecido do Contato (medico, idioma, especialidade) — nunca
+    # re-perguntar dados ja capturados.
+    expira_sessao_horas: int = 72
+    # TTL do lock de exclusividade por ticket (ms). Elevado de 30s -> 90s
+    # com base no pior caso observado de duracao de turno (LLM + multiplos
+    # envios + retries) — ver research.md Decision 4. Aplicado em
+    # app/core/locks.py (FASE 6).
+    lock_ttl_ms: int = 90_000
+
     # --- SSRF allowlist para download de midia ---
     media_download_allowlist: list[str] = ["object.sp2.eveo.com.br"]
 

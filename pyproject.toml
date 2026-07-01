@@ -33,6 +33,10 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "golden: golden set de regressao de jornada (US6) — informativo, excluido do gate padrao (research.md Decision 9)",
+]
+addopts = '-m "not golden"'
 
 [tool.ruff]
 target-version = "py312"

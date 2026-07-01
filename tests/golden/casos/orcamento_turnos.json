@@ -1,0 +1,122 @@
+{
+  "casos": [
+    {
+      "id": "orcamento_abaixo_do_teto_de_no_sem_nudge",
+      "dimensao": "orcamento",
+      "mensagem": "sim",
+      "estado_inicial": {"caminho": 1, "etapa": "qualif_medico", "turnos_no_no": 5},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "turno_acao": null,
+        "motivo": null
+      }
+    },
+    {
+      "id": "orcamento_no_teto_de_no_dispara_nudge_sem_handoff",
+      "dimensao": "orcamento",
+      "mensagem": "sim",
+      "estado_inicial": {"caminho": 1, "etapa": "qualif_medico", "turnos_no_no": 6},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "turno_acao": "nudge",
+        "motivo": "turnos_no_no",
+        "contains": ["especialistas"]
+      }
+    },
+    {
+      "id": "orcamento_duvidas_abaixo_do_teto_elevado_sem_nudge",
+      "dimensao": "orcamento",
+      "mensagem": "ainda tenho uma duvida sobre o curso",
+      "estado_inicial": {
+        "caminho": 1, "etapa": "duvidas", "eh_medico": true, "turnos_no_no": 7
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {"texto": "resposta de duvida", "handoff": false},
+      "knowledge": "BASE",
+      "esperado": {
+        "proxima_acao": "continue",
+        "turno_acao": null,
+        "contains": ["resposta de duvida"]
+      }
+    },
+    {
+      "id": "orcamento_duvidas_no_teto_elevado_dispara_nudge",
+      "dimensao": "orcamento",
+      "mensagem": "ainda tenho duvida",
+      "estado_inicial": {
+        "caminho": 1, "etapa": "duvidas", "eh_medico": true, "turnos_no_no": 12
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {"texto": "resposta de duvida", "handoff": false},
+      "knowledge": "BASE",
+      "esperado": {
+        "proxima_acao": "continue",
+        "turno_acao": "nudge",
+        "motivo": "turnos_no_no"
+      }
+    },
+    {
+      "id": "orcamento_teto_de_sessao_dispara_handoff_destino_logico",
+      "dimensao": "orcamento",
+      "mensagem": "qual o valor do investimento?",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "duvidas", "eh_medico": true,
+        "experiencia_corporal": true, "produto_interesse": "hg-modulo-1",
+        "turnos_sessao": 25
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {"texto": "resposta de duvida", "handoff": false},
+      "knowledge": "BASE",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "handoff_destino": "presencial",
+        "motivo": "turnos_sessao"
+      }
+    },
+    {
+      "id": "orcamento_colisao_sessao_prevalece_sobre_no",
+      "dimensao": "orcamento",
+      "mensagem": "sim",
+      "estado_inicial": {
+        "caminho": 1, "etapa": "qualif_medico", "turnos_sessao": 25, "turnos_no_no": 6
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "motivo": "turnos_sessao",
+        "turno_acao": null
+      }
+    },
+    {
+      "id": "orcamento_destino_c3_especialista",
+      "dimensao": "orcamento",
+      "mensagem": "tenho uma duvida",
+      "estado_inicial": {
+        "caminho": 3, "etapa": "sistema_licenciamento_duvidas", "eh_medico": true,
+        "turnos_sessao": 25
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {"texto": "resposta de duvida", "handoff": false},
+      "knowledge": "BASE",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "handoff_destino": "especialista",
+        "motivo": "turnos_sessao"
+      }
+    },
+    {
+      "id": "orcamento_destino_c4_suporte",
+      "dimensao": "orcamento",
+      "mensagem": "sou aluno e preciso de suporte",
+      "estado_inicial": {"caminho": 4, "turnos_sessao": 25},
+      "intent": {"intencao": "aluno_suporte", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "handoff_destino": "suporte",
+        "motivo": "turnos_sessao"
+      }
+    }
+  ]
+}

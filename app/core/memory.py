@@ -73,6 +73,27 @@ class SessionContext:
     # Perfil livre/incremental do lead (Contato.perfil — JSONB): caracteristicas e
     # preferencias arbitrarias alem da qualificacao fixa, acumuladas entre tickets.
     perfil: dict = field(default_factory=dict)
+    # Intencao classificada no turno corrente (ClassificacaoIntencao.value),
+    # mutada por FlowEngine.process (US5/FR-015 — observabilidade de turno).
+    # Transiente: nao persistida, apenas para o evento log_turno do turno atual.
+    ultima_intencao: Optional[str] = None
+    # Orcamento de turnos (US1, FASE 3, FR-001/FR-002): contadores efemeros em
+    # Redis (hash estado:{chamadoId}), incrementados 1x por turno pelo CALLER
+    # (webhook.py `_handle_engine`, ANTES de FlowEngine.process) e consumidos
+    # por FlowEngine._aplicar_orcamento_turnos para decidir nudge/handoff.
+    # Transientes: nunca persistidos em Postgres, apenas plumbing do turno
+    # atual — a fonte da verdade e sempre o Redis (fail-open ⇒ 0).
+    turnos_sessao: int = 0
+    turnos_no_no: int = 0
+    # Timeout de inatividade e reengajamento (US2, FASE 5, FR-008/FR-009):
+    # horas decorridas desde a `ultima_interacao` anterior (hash Redis
+    # estado:{chamadoId}), calculadas pelo CALLER (webhook.py
+    # `_bump_ultima_interacao`, fail-open) ANTES de FlowEngine.process().
+    # None ⇒ primeiro turno da sessao OU leitura ausente/corrompida —
+    # tratado como interacao recente (nenhuma retomada/expiracao disparada).
+    # Transiente: nunca persistido, apenas plumbing do turno atual (mesmo
+    # padrao de turnos_sessao/turnos_no_no).
+    horas_inatividade: Optional[float] = None
 
 
 class MemoryManager:

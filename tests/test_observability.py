@@ -23,6 +23,7 @@ from app.observability.log import (
     log_handoff,
     log_llm_call,
     log_message_out,
+    log_turno,
     log_webhook_in,
     timed_llm_call,
 )
@@ -307,3 +308,128 @@ def test_log_event_scrub_detalhe():
     e = events[0]
     assert "token" not in e.get("detalhe", {})
     assert e["detalhe"]["mensagem"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Testes de log_turno — evento de observabilidade de turno (task 2.1.4,
+# US5, FR-015/FR-016; contracts/turno-event.md; data-model.md §Entity
+# Registro de Turno). Testes de anti-PII dedicados (CHK006) estao em
+# tests/test_anti_pii_turno.py (task 1.3).
+# ---------------------------------------------------------------------------
+
+def test_log_turno_emite_todos_os_12_campos_do_contrato():
+    """Shape/contrato: os 12 campos definidos em contracts/turno-event.md
+    estao presentes no evento emitido (alem de timestamp/event)."""
+    events = _capture_logs(
+        log_turno,
+        chamado_id=12345,
+        turno_sessao=3,
+        etapa_entrada="QUALIFICACAO_MEDICO",
+        etapa_saida="APRESENTACAO_CURSO",
+        idioma="pt",
+        n_blocos_enviados=2,
+        acao="resposta",
+        duracao_ms=4210,
+        tentativas=0,
+        intencao="interesse_curso",
+        handoff_destino=None,
+        motivo=None,
+    )
+    assert len(events) == 1
+    e = events[0]
+    assert e["event"] == "turno"
+    assert e["chamado_id"] == 12345
+    assert e["turno_sessao"] == 3
+    assert e["etapa_entrada"] == "QUALIFICACAO_MEDICO"
+    assert e["etapa_saida"] == "APRESENTACAO_CURSO"
+    assert e["intencao"] == "interesse_curso"
+    assert e["idioma"] == "pt"
+    assert e["n_blocos_enviados"] == 2
+    assert e["acao"] == "resposta"
+    assert e["handoff_destino"] is None
+    assert e["duracao_ms"] == 4210
+    assert e["tentativas"] == 0
+    assert e["motivo"] is None
+    assert "timestamp" in e
+
+
+def test_log_turno_acao_enum_respeitado():
+    """Todos os valores validos de `acao` (data-model.md) sao aceitos e
+    emitidos sem alteracao."""
+    for acao in ("resposta", "nudge", "handoff", "retomada", "sessao_nova", "erro"):
+        events = _capture_logs(
+            log_turno,
+            chamado_id=1,
+            turno_sessao=1,
+            etapa_entrada="X",
+            etapa_saida="Y",
+            idioma="pt",
+            n_blocos_enviados=0,
+            acao=acao,
+            duracao_ms=0,
+            tentativas=0,
+        )
+        assert events[0]["acao"] == acao
+
+
+def test_log_turno_acao_desconhecida_loga_warning_mas_ainda_emite():
+    """`acao` fora do enum nao trava a emissao (defensivo), mas gera
+    warning via logger — nao deve ser usado por chamadores corretos."""
+    events = _capture_logs(
+        log_turno,
+        chamado_id=1,
+        turno_sessao=1,
+        etapa_entrada="X",
+        etapa_saida="Y",
+        idioma="pt",
+        n_blocos_enviados=0,
+        acao="acao_invalida",
+        duracao_ms=0,
+        tentativas=0,
+    )
+    assert events[0]["acao"] == "acao_invalida"
+
+
+def test_log_turno_handoff_com_destino():
+    """Cenario de handoff por teto de sessao (contracts/turno-event.md
+    exemplo 2)."""
+    events = _capture_logs(
+        log_turno,
+        chamado_id=12345,
+        turno_sessao=25,
+        etapa_entrada="DUVIDAS",
+        etapa_saida="HANDOFF",
+        idioma="pt",
+        n_blocos_enviados=1,
+        acao="handoff",
+        duracao_ms=3800,
+        tentativas=0,
+        intencao="duvida",
+        handoff_destino="consultores",
+        motivo="turnos_sessao",
+    )
+    e = events[0]
+    assert e["acao"] == "handoff"
+    assert e["handoff_destino"] == "consultores"
+    assert e["motivo"] == "turnos_sessao"
+
+
+def test_log_turno_campos_opcionais_default_none():
+    """intencao/handoff_destino/motivo sao nullable — default None quando
+    nao informados."""
+    events = _capture_logs(
+        log_turno,
+        chamado_id=1,
+        turno_sessao=1,
+        etapa_entrada="X",
+        etapa_saida="X",
+        idioma="pt",
+        n_blocos_enviados=0,
+        acao="resposta",
+        duracao_ms=0,
+        tentativas=0,
+    )
+    e = events[0]
+    assert e["intencao"] is None
+    assert e["handoff_destino"] is None
+    assert e["motivo"] is None

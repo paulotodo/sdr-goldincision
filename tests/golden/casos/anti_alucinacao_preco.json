@@ -1,0 +1,125 @@
+{
+  "casos": [
+    {
+      "id": "preco_c1_fora_da_base_sem_conhecimento",
+      "dimensao": "preco",
+      "mensagem": "quanto custa o curso em euros para pagamento internacional facilitado?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "Não tenho essa informação disponível agora. Vou encaminhar para nossa equipe.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true,
+        "sem_preco_inventado": true
+      }
+    },
+    {
+      "id": "preco_c2_fora_da_base_sem_conhecimento",
+      "dimensao": "preco",
+      "mensagem": "tem desconto para pagamento à vista em bitcoin?",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "duvidas", "eh_medico": true,
+        "experiencia_corporal": true, "produto_interesse": "hg360-sp"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "Não tenho essa informação disponível agora. Vou encaminhar para nossa equipe.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "sem_preco_inventado": true
+      }
+    },
+    {
+      "id": "preco_c3_licenciamento_fora_da_base",
+      "dimensao": "preco",
+      "mensagem": "qual o valor da taxa de licenciamento em iene?",
+      "estado_inicial": {"caminho": 3, "etapa": "sistema_licenciamento_duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "Não tenho essa informação disponível agora. Vou encaminhar para nossa equipe.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "sem_preco_inventado": true
+      }
+    },
+    {
+      "id": "preco_c1_dentro_da_base_preco_legitimo",
+      "dimensao": "preco",
+      "mensagem": "Quanto custa o curso online?",
+      "estado_inicial": {"caminho": 1},
+      "intent": {"intencao": "curso_online", "idioma": "pt"},
+      "responder": {
+        "texto": "O investimento do Curso Online é de R$ 4.997,00 à vista ou em até 12x.",
+        "handoff": false
+      },
+      "knowledge": "BASE",
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "contains": ["R$ 4.997,00"]
+      }
+    },
+    {
+      "id": "preco_c2_dentro_da_base_preco_legitimo",
+      "dimensao": "preco",
+      "mensagem": "qual o investimento do módulo 1?",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "duvidas", "eh_medico": true,
+        "produto_interesse": "hg-modulo-1"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "O investimento do HG Módulo 1 é de R$ 6.500,00.",
+        "handoff": false
+      },
+      "knowledge": "BASE",
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "contains": ["R$ 6.500,00"]
+      }
+    },
+    {
+      "id": "preco_fora_da_base_en",
+      "dimensao": "preco",
+      "mensagem": "how much does it cost with an installment plan in USD?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true, "idioma": "en"},
+      "intent": {"intencao": "ambigua", "idioma": "en"},
+      "responder": {
+        "texto": "I don't have that information available right now. I'll connect you with our team.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "sem_preco_inventado": true
+      }
+    },
+    {
+      "id": "preco_fora_da_base_es",
+      "dimensao": "preco",
+      "mensagem": "¿cuánto cuesta con plan de pago en dólares?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true, "idioma": "es"},
+      "intent": {"intencao": "ambigua", "idioma": "es"},
+      "responder": {
+        "texto": "No tengo esa información disponible ahora. Voy a conectarte con nuestro equipo.",
+        "handoff": true
+      },
+      "knowledge": "",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "sem_preco_inventado": true
+      }
+    }
+  ]
+}

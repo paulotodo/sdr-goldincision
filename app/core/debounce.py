@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional
 
 from app.core.redis_keys import debounce_key
 
@@ -99,9 +99,19 @@ class DebounceManager:
         self,
         chamado_id: int,
         callback: Callable[[int, list[dict]], Awaitable[None]],
+        delay_seconds: Optional[float] = None,
     ) -> None:
-        """Aguarda a janela e executa o flush."""
-        await asyncio.sleep(self._debounce_seconds)
+        """
+        Aguarda a janela (ou `delay_seconds` custom — usado pelo recovery de
+        startup, task 4.1.2) e executa o flush.
+
+        `delay_seconds=None` preserva o comportamento original (janela
+        cheia `self._debounce_seconds`, fluxo normal de `push_and_schedule`).
+        `delay_seconds=0` dispara flush imediato (janela ja expirada).
+        """
+        await asyncio.sleep(
+            self._debounce_seconds if delay_seconds is None else delay_seconds
+        )
         messages = await self.flush(chamado_id)
         if not messages:
             logger.debug("debounce: flush chamado_id=%s lista vazia (ja flushed)", chamado_id)
@@ -153,3 +163,95 @@ class DebounceManager:
         key = debounce_key(chamado_id)
         result = await self._redis.llen(key)
         return int(result or 0)
+
+    async def recover_pending(
+        self,
+        flush_callback: Callable[[int, list[dict]], Awaitable[None]],
+    ) -> int:
+        """
+        Recovery de startup (US3, FASE 4, task 4.1.1/4.1.2): escaneia todas
+        as chaves `debounce:*` remanescentes de um restart/deploy anterior e
+        reagenda (ou dispara imediatamente) o flush de cada rajada pendente,
+        sem exigir nova mensagem do lead (Acceptance Scenario 1, US3).
+
+        Estrategia conservadora (task 4.1.2): a chave so recebe TTL no push
+        (`push_and_schedule`: `ttl = debounce_seconds + _TTL_MARGIN_SECONDS`).
+        O TTL restante (`TTL key`) revela quanto tempo decorreu desde o
+        ultimo push:
+
+            janela_restante = ttl_restante - _TTL_MARGIN_SECONDS
+              > 0  -> ainda dentro da janela de debounce: reagenda o flush
+                      para daqui a `janela_restante` segundos (equivalente a
+                      completar a janela original interrompida pelo restart).
+              <= 0 -> janela ja tinha expirado no momento do restart
+                      (Acceptance Scenario 2, US3): flush imediato
+                      (`delay_seconds=0`).
+
+        TTL ausente/expirado (`-2`) ou sem expiracao (`-1`, nao deveria
+        ocorrer pois toda chave e criada com `EXPIRE`) tambem cai no ramo de
+        flush imediato — postura conservadora: nunca deixar uma rajada
+        "presa" esperando um agendamento que nunca vai disparar.
+
+        Idempotente (task 4.1.3/4.1.7): o flush em si (`flush()`) e um
+        LRANGE+DEL atomico via pipeline — se `recover_pending` rodar mais de
+        uma vez (ex.: retries de lifespan, multiplos workers), a segunda
+        chamada encontra a lista ja vazia e o callback simplesmente nao e
+        invocado de novo (mesma garantia do fluxo normal de
+        `_delayed_flush`). O gate de fila (IA=77) e o filtro de estado do
+        ticket (em_handoff/encerrado) sao reavaliados no proprio
+        `flush_callback` (task 4.1.4) — nao precisam ser duplicados aqui.
+
+        Nao bloqueia o startup: cada rajada e agendada como task asyncio
+        independente (mesmo padrao de `push_and_schedule`); esta corrotina
+        so faz o SCAN + TTL (leitura rapida) e retorna.
+
+        Returns:
+            Quantidade de chamados com rajada pendente recuperada (agendada
+            ou flushed imediatamente).
+        """
+        recovered = 0
+        cursor = 0
+        pattern = "debounce:*"
+        while True:
+            cursor, keys = await self._redis.scan(cursor=cursor, match=pattern, count=100)
+            for raw_key in keys or []:
+                key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
+                try:
+                    chamado_id = int(key.split(":", 1)[1])
+                except (IndexError, ValueError):
+                    logger.warning(
+                        "debounce: recovery chave invalida ignorada key=%s", key
+                    )
+                    continue
+
+                ttl = await self._redis.ttl(key)
+                janela_restante = (
+                    ttl - _TTL_MARGIN_SECONDS if ttl is not None and ttl > 0 else -1
+                )
+
+                if janela_restante > 0:
+                    logger.info(
+                        "debounce: recovery chamado_id=%s reagendando flush em %ss",
+                        chamado_id, janela_restante,
+                    )
+                    delay = janela_restante
+                else:
+                    logger.info(
+                        "debounce: recovery chamado_id=%s janela expirada/ausente "
+                        "(ttl=%s) — flush imediato",
+                        chamado_id, ttl,
+                    )
+                    delay = 0
+
+                asyncio.create_task(
+                    self._delayed_flush(
+                        chamado_id, flush_callback, delay_seconds=delay
+                    ),
+                    name=f"debounce-recovery-flush-{chamado_id}",
+                )
+                recovered += 1
+
+            if not cursor:
+                break
+
+        return recovered

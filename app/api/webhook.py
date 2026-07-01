@@ -252,8 +252,10 @@ async def _handle_engine(
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.config import settings as cfg
+    from app.core.fidelity import FidelityGate
     from app.core.flow import FlowEngine, _tent_count
     from app.core.intent import IntentClassifier
+    from app.core.interpret import SlotExtractor
     from app.core.memory import MemoryManager
     from app.core.responder import GroundedResponder
     from app.integrations.chatmaster import make_chatmaster_client
@@ -337,16 +339,23 @@ async def _handle_engine(
                 openai_client=openai_client,
             )
             intent_classifier = IntentClassifier(openai_client=openai_client)
+            fidelity_gate = FidelityGate(
+                openai_client=openai_client,
+                timeout_seconds=cfg.verify_timeout_seconds,
+            )
             responder = GroundedResponder(
                 openai_client=openai_client,
                 max_tokens=cfg.reasoning_max_tokens,
+                fidelity_gate=fidelity_gate,
             )
+            slot_extractor = SlotExtractor(openai_client=openai_client)
             engine = FlowEngine(
                 db_session=db_session,
                 intent_classifier=intent_classifier,
                 memory_manager=memory_manager,
                 responder=responder,
                 nidia_phone=cfg.nidia_phone or _NIDIA_DEFAULT,
+                slot_extractor=slot_extractor,
             )
 
             # Carregar contexto da sessao (DB + Redis)
@@ -404,6 +413,16 @@ async def _handle_engine(
             # Melhor esforco: contador anti-loop da etapa de saida (nao gateia nada).
             _turno_evt["tentativas"] = (
                 _tent_count(context, flow_result.etapa) if flow_result.etapa else 0
+            )
+            # Observabilidade aditiva (FASE 4, task 4.3 — sdr-fidelidade-json):
+            # confianca de slot-filling (Pilar 8) e veredito do Portao de
+            # Fidelidade (Pilar 7) deste turno, quando acionados. None quando
+            # o mecanismo correspondente nao rodou — log_turno OMITE o campo
+            # nesse caso (contrato aditivo, nunca quebra o schema da Onda 1).
+            _turno_evt["confianca_slot"] = flow_result.confianca_slot
+            _turno_evt["fidelidade_fiel"] = flow_result.fidelidade_fiel
+            _turno_evt["fidelidade_afirmacoes_nao_sustentadas"] = (
+                flow_result.fidelidade_afirmacoes_nao_sustentadas
             )
 
             # ---------------------------------------------------------------
@@ -513,6 +532,11 @@ async def _handle_engine(
                     intencao=_turno_evt.get("intencao"),
                     handoff_destino=_turno_evt.get("handoff_destino"),
                     motivo=_turno_evt.get("motivo"),
+                    confianca_slot=_turno_evt.get("confianca_slot"),
+                    fidelidade_fiel=_turno_evt.get("fidelidade_fiel"),
+                    fidelidade_afirmacoes_nao_sustentadas=_turno_evt.get(
+                        "fidelidade_afirmacoes_nao_sustentadas"
+                    ),
                 )
 
 

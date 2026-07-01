@@ -88,6 +88,33 @@ pip install -e ".[dev]"
 pytest tests/
 ```
 
+### Golden set (regressao de jornada)
+
+Suite de casos de referencia que roda o **FlowEngine real** (so a leitura da
+Base Oficial e stubada) contra jornadas completas do Mapa Mestre — fluxo
+normal, abstencao/anti-alucinacao de preco, handoff, orcamento de turnos,
+reengajamento e (Onda 2) o Portao de Fidelidade (Pilar 7). E **informativa**
+(research.md Decision 9 / CHK011): nao ha um patamar minimo de acerto que
+bloqueie o merge, mas cada caso individual fica visivel se falhar.
+
+Marcada com `@pytest.mark.golden` e **excluida do gate padrao de CI**
+(`pyproject.toml`: `addopts = '-m "not golden"'`). Rodar manualmente:
+
+```bash
+# Todos os casos, com relatorio agregado por dimensao
+python3 -m pytest tests/golden -m golden -s
+
+# So a taxa de acerto (sem detalhar cada caso individual)
+python3 -m pytest tests/golden -m golden -k test_golden_relatorio -s
+```
+
+Casos ficam em `tests/golden/casos/*.json` (um arquivo por dimensao:
+`fluxo_normal`, `abstencao`, `anti_alucinacao_preco`, `handoff`,
+`orcamento_turnos`, `reengajamento`, `fidelidade`). Para adicionar um caso
+novo, seguir o schema existente (`mensagem`, `estado_inicial`, `intent`,
+`responder`, `knowledge`, `esperado`) em qualquer um desses arquivos ou criar
+um novo `tests/golden/casos/<dimensao>.json`.
+
 ## Estrutura de diretorios
 
 ```

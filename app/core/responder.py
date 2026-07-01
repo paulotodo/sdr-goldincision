@@ -16,6 +16,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from app.core.contracts import RespostaEstruturada
+from app.core.fidelity import FidelityGate, gatilho_condicao_comercial
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -61,8 +64,9 @@ FORMATO DAS RESPOSTAS:
 - Emojis de forma natural e moderada.
 - Responda no idioma do lead: {idioma_nome}
 
-HANDOFF: se a informação não estiver na base, finalize com:
-"Vou conectar você com nossa equipe para mais informações." [HANDOFF_NECESSARIO]
+HANDOFF: se a informação não estiver na base, escreva o texto:
+"Vou conectar você com nossa equipe para mais informações."
+e defina precisa_handoff=true no pacote de resposta estruturada.
 """
 
 _IDIOMA_NOMES = {"pt": "Português", "en": "English", "es": "Español"}
@@ -139,12 +143,42 @@ _SLUG_PROMPTS = {
     "licenciamento-internacional": _SYSTEM_LICENCIAMENTO,
 }
 
-# Marcador de handoff na resposta do LLM
-HANDOFF_MARKER = "[HANDOFF_NECESSARIO]"
-
 # Teto de tokens da geracao (concisao): respostas objetivas e resumidas, sem
 # despejar apresentacoes inteiras. Configuravel via settings.reasoning_max_tokens.
 REASONING_MAX_TOKENS = 280
+
+# FR-002/FR-003: 1 retry em pacote malformado (2 tentativas no total); 2a falha
+# -> precisa_handoff=True (nunca conteudo improvisado).
+_MAX_TENTATIVAS_CONTRATO = 2
+
+# FR-004: temperatura baixa (0-0.2) quando a etapa/mensagem trata de fatos
+# sensiveis (preco/data/condicao comercial/elegibilidade); demais casos mantem
+# o padrao conversacional (0.3).
+_TEMPERATURA_FACTUAL = 0.2
+_TEMPERATURA_PADRAO = 0.3
+_PALAVRAS_CONTEXTO_FACTUAL = (
+    "preço",
+    "preco",
+    "valor",
+    "valores",
+    "parcel",
+    "desconto",
+    "promo",
+    "data",
+    "prazo",
+    "turma",
+    "vaga",
+    "disponibilidade",
+    "elegib",
+    "crm",
+)
+
+
+def _e_contexto_factual(etapa: str, user_message: str) -> bool:
+    """FR-004: identifica se a etapa/mensagem corrente trata de fatos sensiveis
+    (preco/data/condicao comercial/elegibilidade), exigindo temperatura baixa."""
+    texto = f"{etapa or ''} {user_message or ''}".lower()
+    return any(palavra in texto for palavra in _PALAVRAS_CONTEXTO_FACTUAL)
 
 
 class GroundedResponder:
@@ -156,11 +190,28 @@ class GroundedResponder:
     """
 
     def __init__(
-        self, openai_client: Any, max_tokens: int = REASONING_MAX_TOKENS
+        self,
+        openai_client: Any,
+        max_tokens: int = REASONING_MAX_TOKENS,
+        fidelity_gate: Optional[FidelityGate] = None,
     ) -> None:
         self._client = openai_client
         # Teto de concisao para a geracao de raciocinio (respostas resumidas).
         self._max_tokens = max_tokens
+        # Portao de Fidelidade (Pilar 7, FR-008..FR-012): opcional para
+        # retrocompatibilidade com testes/instancias que nao cobrem este
+        # pilar. Producao SEMPRE injeta um (app/api/webhook.py). None
+        # desativa o portao (equivalente a sempre aprovar a resposta gerada).
+        self._fidelity_gate = fidelity_gate
+        # Observabilidade aditiva (FASE 4, task 4.3 — sdr-fidelidade-json):
+        # ultimo veredito do Portao de Fidelidade desta instancia, exposto
+        # para o FlowEngine repassar a `log_turno` sem alterar a assinatura
+        # de `generate()` (que permanece a 2-tupla `(texto, handoff)` — FR-006).
+        # `FlowEngine.process()` reseta estes atributos ANTES de cada turno
+        # (evita vazamento de veredito de um turno anterior quando o portao
+        # nao e acionado no turno corrente).
+        self.last_fidelidade_fiel: Optional[bool] = None
+        self.last_fidelidade_afirmacoes_nao_sustentadas: Optional[list[str]] = None
 
     async def generate(
         self,
@@ -189,8 +240,13 @@ class GroundedResponder:
 
         Returns:
             (texto_resposta, handoff_necessario)
-            - texto_resposta: resposta para enviar ao lead (sem o marcador HANDOFF)
-            - handoff_necessario: True se o marcador HANDOFF_NECESSARIO apareceu
+            - texto_resposta: resposta para enviar ao lead (campo `texto` do
+              pacote `RespostaEstruturada`)
+            - handoff_necessario: campo `precisa_handoff` do pacote, ou True se
+              o pacote nao pode ser validado apos 1 retry (FR-002/FR-003)
+
+        FlowEngine NUNCA recebe o objeto `RespostaEstruturada` (FR-006) — apenas
+        esta 2-tupla.
         """
         idioma_nome = _IDIOMA_NOMES.get(idioma, "Português")
         # Resolve o prompt por SLUG (corrige a colisao de indices numericos: os
@@ -241,28 +297,101 @@ class GroundedResponder:
             }
         )
 
-        try:
-            raw_response = await self._client.chat_reasoning(
-                messages, max_tokens=self._max_tokens, temperature=0.3
-            )
-        except Exception as exc:
-            logger.error("responder: falha na geracao de resposta. err=%s", exc)
-            return _fallback_error_response(idioma), False
+        # FR-004: temperatura baixa (0-0.2) em contexto factual (preco/data/
+        # condicao comercial/elegibilidade); demais casos mantem o padrao 0.3.
+        temperature = (
+            _TEMPERATURA_FACTUAL
+            if _e_contexto_factual(etapa, user_message)
+            else _TEMPERATURA_PADRAO
+        )
 
-        # Verificar marcador de handoff
-        handoff = HANDOFF_MARKER in raw_response
-        clean_response = raw_response.replace(HANDOFF_MARKER, "").strip()
+        # FR-002/FR-003: gera via response_format=json_schema, valida contra
+        # RespostaEstruturada, com 1 retry em pacote malformado (2 tentativas no
+        # total). FR-005: idioma do pacote deve bater com o idioma ja
+        # identificado da conversa — divergencia conta como pacote invalido.
+        pacote: Optional[RespostaEstruturada] = None
+        for tentativa in range(_MAX_TENTATIVAS_CONTRATO):
+            try:
+                raw_response = await self._client.chat_reasoning_json(
+                    messages,
+                    RespostaEstruturada,
+                    max_tokens=self._max_tokens,
+                    temperature=temperature,
+                )
+                candidato = RespostaEstruturada.model_validate_json(raw_response)
+            except Exception as exc:
+                logger.warning(
+                    "responder: pacote malformado (tentativa %s/%s). err=%s",
+                    tentativa + 1,
+                    _MAX_TENTATIVAS_CONTRATO,
+                    exc,
+                )
+                continue
+
+            if candidato.idioma != idioma:
+                logger.warning(
+                    "responder: idioma do pacote diverge do esperado "
+                    "(esperado=%s recebido=%s, tentativa %s/%s)",
+                    idioma,
+                    candidato.idioma,
+                    tentativa + 1,
+                    _MAX_TENTATIVAS_CONTRATO,
+                )
+                continue
+
+            pacote = candidato
+            break
+
+        if pacote is None:
+            # 2a falha (malformado ou idioma divergente) -> handoff, nunca
+            # conteudo improvisado (FR-002/FR-003).
+            logger.error(
+                "responder: pacote invalido apos %s tentativas -> handoff. "
+                "caminho=%s etapa=%s idioma=%s",
+                _MAX_TENTATIVAS_CONTRATO,
+                caminho,
+                etapa,
+                idioma,
+            )
+            return _fallback_error_response(idioma), True
 
         logger.info(
-            "responder: caminho=%s etapa=%s idioma=%s handoff=%s chars=%s",
+            "responder: caminho=%s etapa=%s idioma=%s handoff=%s confianca=%.2f chars=%s",
             caminho,
             etapa,
             idioma,
-            handoff,
-            len(clean_response),
+            pacote.precisa_handoff,
+            pacote.confianca,
+            len(pacote.texto),
         )
 
-        return clean_response, handoff
+        # Portao de Fidelidade (Pilar 7, FR-008..FR-012): so aciona quando o
+        # texto JA REDIGIDO toca condicao comercial (dec-010) — verbatim/
+        # rapport nunca chegam aqui (nunca acionam o gatilho). Fail-closed:
+        # gate reprovado -> NAO envia o texto gerado, cai no bloco canonico
+        # "informacao indisponivel" + handoff (nunca conteudo nao sustentado).
+        if self._fidelity_gate is not None and gatilho_condicao_comercial(pacote.texto):
+            veredito = await self._fidelity_gate.verificar(pacote.texto, knowledge_context)
+            # Observabilidade aditiva (task 4.3): expor o veredito para o
+            # FlowEngine repassar a log_turno, independente de fiel=True/False
+            # (nunca altera o comportamento/retorno de generate() — FR-006).
+            self.last_fidelidade_fiel = veredito.fiel
+            self.last_fidelidade_afirmacoes_nao_sustentadas = list(
+                veredito.afirmacoes_nao_sustentadas
+            )
+            if not veredito.fiel:
+                logger.warning(
+                    "responder: portao de fidelidade reprovou a resposta gerada "
+                    "(condicao comercial sem sustentacao na base) -> bloco "
+                    "canonico + handoff. caminho=%s etapa=%s n_afirmacoes_nao_sustentadas=%s",
+                    caminho,
+                    etapa,
+                    len(veredito.afirmacoes_nao_sustentadas),
+                )
+                return _fallback_indisponivel_response(idioma), True
+
+        # FR-006: FlowEngine nunca ve o objeto RespostaEstruturada, so a 2-tupla.
+        return pacote.texto, pacote.precisa_handoff
 
     async def generate_menu(self, idioma: str = "pt") -> str:
         """
@@ -382,4 +511,28 @@ def _fallback_error_response(idioma: str) -> str:
         return (
             "Estou com uma instabilidade momentânea. Tente novamente em instantes "
             "ou posso encaminhar para nossa equipe."
+        )
+
+
+def _fallback_indisponivel_response(idioma: str) -> str:
+    """
+    Bloco canonico "informacao indisponivel" (FR-012, Pilar 7): usado quando o
+    Portao de Fidelidade reprova a resposta gerada (condicao comercial sem
+    sustentacao explicita na base oficial). NUNCA envia o texto reprovado —
+    fail-closed: erro/duvida de groundedness == recusa + handoff.
+    """
+    if idioma == "en":
+        return (
+            "I don't have that information confirmed right now. "
+            "I'll connect you with our team so they can help with the exact details."
+        )
+    elif idioma == "es":
+        return (
+            "No tengo esa información confirmada en este momento. "
+            "Voy a conectarte con nuestro equipo para que te ayude con los detalles exactos."
+        )
+    else:
+        return (
+            "Não tenho essa informação confirmada no momento. "
+            "Vou encaminhar você para nossa equipe para confirmar os detalhes exatos."
         )

@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.intent import INTENCAO_PARA_CAMINHO, ClassificacaoIntencao, IntentClassifier
+from app.core.interpret import SlotExtractor, permitir_reversao
 from app.core.memory import MemoryManager, SessionContext
 from app.core.responder import GroundedResponder
 from app.repository.models import (
@@ -85,6 +86,56 @@ _SLUG_LICENCIAMENTO = "licenciamento-internacional"
 
 # Especialidades medicas que qualificam ao HG360 (conforme MAPA MESTRE)
 _ESPECIALIDADES_HG360 = {"dermatologia", "cirurgia plastica", "cirurgia vascular"}
+
+# ---------------------------------------------------------------------------
+# Slot schemas do fallback agentico (Pilar 8, FR-013..FR-018) — cobertura
+# minima das 5 etapas (data-model.md §3). So descrevem o PROMPT passado a
+# `SlotExtractor.extract()`; o formato de saida e sempre `SlotQualificacao`.
+# ---------------------------------------------------------------------------
+_SLOT_SCHEMA_EH_MEDICO = {
+    "nome": "elegibilidade_medica",
+    "descricao": (
+        "Se o lead confirma ser medico com registro profissional (CRM) ativo. "
+        "'sim' = e medico com registro ativo; 'nao' = nao e medico (ou nao tem "
+        "registro ativo)."
+    ),
+    "valores_esperados": ["sim", "nao"],
+}
+_SLOT_SCHEMA_OBJETIVO_SISTEMA = {
+    "nome": "objetivo_sistema",
+    "descricao": (
+        "O que o lead busca no Sistema GoldIncision: 'incorporar' (ja tem "
+        "clinica e quer licenciar o sistema), 'abrir' (quer abrir uma clinica "
+        "nova/franquia) ou 'nao_sei' (ainda incerto sobre qual modelo)."
+    ),
+    "valores_esperados": ["incorporar", "abrir", "nao_sei"],
+}
+_SLOT_SCHEMA_EXPERIENCIA_CORPORAL = {
+    "nome": "experiencia_corporal",
+    "descricao": (
+        "Se o lead ja tem experiencia previa em Harmonizacao Corporal (gluteo/"
+        "preenchimento corporal) — nao apenas facial. 'sim' ou 'nao'."
+    ),
+    "valores_esperados": ["sim", "nao"],
+}
+_SLOT_SCHEMA_ESPECIALIDADE = {
+    "nome": "especialidade",
+    "descricao": (
+        "Especialidade medica do lead, quando relevante para elegibilidade ao "
+        "HG360 (dermatologia, cirurgia plastica, cirurgia vascular). Se o lead "
+        "nao tiver nenhuma dessas ou disser que nao possui especialidade, use "
+        "'outra'."
+    ),
+    "valores_esperados": ["dermatologia", "cirurgia plastica", "cirurgia vascular", "outra"],
+}
+_SLOT_SCHEMA_ESCOLHA_TURMA = {
+    "nome": "escolha_turma",
+    "descricao": (
+        "Turma do HG360 escolhida pelo lead: 'sp' (Sao Paulo/Brasil) ou "
+        "'barcelona' (Espanha/Julho)."
+    ),
+    "valores_esperados": ["sp", "barcelona"],
+}
 
 # ---------------------------------------------------------------------------
 # Etapas finas por caminho (estado da maquina, persistido em ticket.etapa)
@@ -854,6 +905,9 @@ class FlowResult:
         handoff_motivo: Optional[str] = None,
         turno_acao: Optional[str] = None,
         motivo: Optional[str] = None,
+        confianca_slot: Optional[float] = None,
+        fidelidade_fiel: Optional[bool] = None,
+        fidelidade_afirmacoes_nao_sustentadas: Optional[list] = None,
     ):
         self.response_text = response_text
         self.action = action
@@ -872,6 +926,15 @@ class FlowResult:
         # "pedido_humano", usado tambem para persistencia em Ticket).
         self.turno_acao = turno_acao
         self.motivo = motivo
+        # Observabilidade aditiva (FASE 4, task 4.3 — sdr-fidelidade-json):
+        # atribuidos POS-HOC por `FlowEngine.process()` (nao pelos handlers
+        # que constroem FlowResult), a partir do estado do turno corrente —
+        # ver `process()`. None quando o mecanismo correspondente nao foi
+        # acionado neste turno (fast-path deterministico / sem condicao
+        # comercial / verbatim).
+        self.confianca_slot = confianca_slot
+        self.fidelidade_fiel = fidelidade_fiel
+        self.fidelidade_afirmacoes_nao_sustentadas = fidelidade_afirmacoes_nao_sustentadas
 
 
 class FlowEngine:
@@ -891,12 +954,25 @@ class FlowEngine:
         memory_manager: MemoryManager,
         responder: GroundedResponder,
         nidia_phone: str = _NIDIA_DEFAULT,
+        slot_extractor: Optional[SlotExtractor] = None,
     ) -> None:
         self._db = db_session
         self._intent = intent_classifier
         self._memory = memory_manager
         self._responder = responder
         self._nidia_phone = nidia_phone
+        # Pilar 8 (FR-013..FR-018): fallback agentico, opcional (default None =
+        # desativado, retrocompat com testes legados que nao o injetam — mesmo
+        # padrao de `fidelity_gate` em GroundedResponder). Quando None, os
+        # resolvers de slot caem direto no fast-path/"nao entendido".
+        self._slot_extractor = slot_extractor
+        # Observabilidade aditiva (FASE 4, task 4.3): confianca do ULTIMO
+        # fallback agentico de slot-filling acionado no turno corrente.
+        # Resetado a cada `process()` (evita vazamento entre turnos) e
+        # setado pelos resolvers (`_resolver_slot_booleano` e demais) SOMENTE
+        # quando o `SlotExtractor` de fato roda (fast-path resolvido nao
+        # define confianca — nao ha "confianca do fallback" a reportar).
+        self._last_confianca_slot: Optional[float] = None
 
     async def process(
         self, ticket_id: int, user_message: str, context: SessionContext
@@ -920,10 +996,31 @@ class FlowEngine:
            ambos disparam no mesmo turno (escalonamento de negocio e mais
            urgente que uma mensagem de boas-vindas).
         """
+        # Observabilidade aditiva (task 4.3): resetar ANTES do turno para
+        # nunca vazar o veredito/confianca de um turno anterior quando o
+        # mecanismo correspondente nao e acionado no turno corrente.
+        self._last_confianca_slot = None
+        if self._responder is not None:
+            self._responder.last_fidelidade_fiel = None
+            self._responder.last_fidelidade_afirmacoes_nao_sustentadas = None
+
         estado_inatividade = self._aplicar_reengajamento_pre(context)
         result = await self._process_core(ticket_id, user_message, context)
         result = self._aplicar_reengajamento_pos(context, result, estado_inatividade)
-        return self._aplicar_orcamento_turnos(context, result)
+        result = self._aplicar_orcamento_turnos(context, result)
+
+        # Anexar observabilidade aditiva ao FlowResult final (pos-hoc — task
+        # 4.3): nunca altera decisao de fluxo, apenas repassa o que os
+        # mecanismos de Pilar 7/Pilar 8 registraram neste turno (ou None,
+        # se nenhum foi acionado). `self._responder` pode ser None em
+        # cenarios de teste legados que nao o injetam.
+        result.confianca_slot = self._last_confianca_slot
+        if self._responder is not None:
+            result.fidelidade_fiel = self._responder.last_fidelidade_fiel
+            result.fidelidade_afirmacoes_nao_sustentadas = (
+                self._responder.last_fidelidade_afirmacoes_nao_sustentadas
+            )
+        return result
 
     # ------------------------------------------------------------------
     # Timeout de inatividade e reengajamento (US2, FASE 5 — FR-008 a FR-010)
@@ -1242,6 +1339,149 @@ class FlowEngine:
         return FlowResult(texto, "continue", caminho, etapa, updates)
 
     # ------------------------------------------------------------------
+    # Interpretacao Agentica / Slot-Filling por etapa (Pilar 8, FR-013..FR-018)
+    #
+    # Cada resolver: 1) fast-path deterministico primeiro (FR-013, sem LLM);
+    # 2) SO se nao resolver, fallback agentico via SlotExtractor (FR-014/016);
+    # 3) confianca < limiar OU slot invalido -> None ("nao entendido", nunca
+    #    adivinha — FR-015); 4) guarda contra reversao silenciosa de fato ja
+    #    consolidado quando o resolver e usado para revisitar um valor
+    #    conhecido (FASE 3.5/CHK014).
+    # ------------------------------------------------------------------
+
+    async def _resolver_slot_booleano(
+        self,
+        user_message: str,
+        contexto: str,
+        *,
+        fast_path_valor: Optional[bool],
+        slot_schema: dict,
+        valor_atual: Optional[bool] = None,
+    ) -> Optional[bool]:
+        """Resolver generico para slots booleanos (sim/nao) — usado por
+        `eh_medico` e `experiencia_corporal`."""
+        if fast_path_valor is not None:
+            if not permitir_reversao(
+                valor_atual, fast_path_valor, veio_de_fastpath=True, confianca=1.0,
+            ):
+                return valor_atual
+            return fast_path_valor
+        if self._slot_extractor is None:
+            return None
+        slot = await self._slot_extractor.extract(slot_schema, user_message, contexto)
+        self._last_confianca_slot = slot.confianca  # observabilidade aditiva (task 4.3)
+        limiar = settings.slot_confidence_threshold
+        if not SlotExtractor.aceitar(slot, limiar):
+            return None
+        novo = _norm(slot.valor or "") in {"sim", "yes", "si", "true"}
+        if not permitir_reversao(
+            valor_atual, novo, veio_de_fastpath=False, confianca=slot.confianca,
+        ):
+            return valor_atual
+        return novo
+
+    async def _resolver_eh_medico(
+        self, context: SessionContext, user_message: str
+    ) -> Optional[bool]:
+        """ETAPA_QUALIF_MEDICO (data-model.md §3, linha 1)."""
+        return await self._resolver_slot_booleano(
+            user_message, _perfil_conhecido(context),
+            fast_path_valor=_detectar_confirmacao(user_message),
+            slot_schema=_SLOT_SCHEMA_EH_MEDICO,
+            valor_atual=context.eh_medico,
+        )
+
+    async def _resolver_experiencia_corporal(
+        self, context: SessionContext, user_message: str
+    ) -> Optional[bool]:
+        """ETAPA_QUALIF_EXPERIENCIA (data-model.md §3, linha 3)."""
+        return await self._resolver_slot_booleano(
+            user_message, _perfil_conhecido(context),
+            fast_path_valor=_detectar_experiencia_corporal(user_message),
+            slot_schema=_SLOT_SCHEMA_EXPERIENCIA_CORPORAL,
+            valor_atual=context.experiencia_corporal,
+        )
+
+    async def _resolver_objetivo_sistema(
+        self, context: SessionContext, user_message: str
+    ) -> Optional[str]:
+        """ETAPA_SISTEMA_OBJETIVO (data-model.md §3, linha 2)."""
+        fast = _detectar_objetivo_sistema(user_message)
+        if fast is not None:
+            return fast
+        if self._slot_extractor is None:
+            return None
+        slot = await self._slot_extractor.extract(
+            _SLOT_SCHEMA_OBJETIVO_SISTEMA, user_message, _perfil_conhecido(context),
+        )
+        self._last_confianca_slot = slot.confianca  # observabilidade aditiva (task 4.3)
+        if not SlotExtractor.aceitar(slot, settings.slot_confidence_threshold):
+            return None
+        valor = _norm(slot.valor or "")
+        if valor in {"incorporar", "abrir", "nao_sei"}:
+            return valor
+        return None
+
+    async def _resolver_especialidade(
+        self, context: SessionContext, user_message: str
+    ) -> Optional[str]:
+        """ETAPA_QUALIF_ESPECIALIDADE (data-model.md §3, linha 4)."""
+        fast = _detectar_especialidade(user_message)
+        if fast is not None:
+            if not permitir_reversao(
+                context.especialidade, fast, veio_de_fastpath=True, confianca=1.0,
+            ):
+                return context.especialidade
+            return fast
+        if self._slot_extractor is None:
+            return None
+        slot = await self._slot_extractor.extract(
+            _SLOT_SCHEMA_ESPECIALIDADE, user_message, _perfil_conhecido(context),
+        )
+        self._last_confianca_slot = slot.confianca  # observabilidade aditiva (task 4.3)
+        if not SlotExtractor.aceitar(slot, settings.slot_confidence_threshold):
+            return None
+        valor = _norm(slot.valor or "")
+        mapa = {
+            "dermatologia": "dermatologia",
+            "cirurgia plastica": "cirurgia plastica",
+            "cirurgia vascular": "cirurgia vascular",
+            "outra": "outra",
+        }
+        novo = mapa.get(valor)
+        if novo is None:
+            return None
+        if not permitir_reversao(
+            context.especialidade, novo, veio_de_fastpath=False, confianca=slot.confianca,
+        ):
+            return context.especialidade
+        return novo
+
+    async def _resolver_escolha_turma(
+        self, context: SessionContext, user_message: str
+    ) -> Optional[str]:
+        """ETAPA_ESCOLHA_TURMA (data-model.md §3, linha 5). Opcao numerica de
+        menu permanece SEMPRE deterministica (dentro de `_detectar_escolha_turma`,
+        FR-019) — nunca delegada ao fallback agentico."""
+        fast = _detectar_escolha_turma(user_message)
+        if fast is not None:
+            return fast
+        if self._slot_extractor is None:
+            return None
+        slot = await self._slot_extractor.extract(
+            _SLOT_SCHEMA_ESCOLHA_TURMA, user_message, _perfil_conhecido(context),
+        )
+        self._last_confianca_slot = slot.confianca  # observabilidade aditiva (task 4.3)
+        if not SlotExtractor.aceitar(slot, settings.slot_confidence_threshold):
+            return None
+        valor = _norm(slot.valor or "")
+        if valor in {"sp", "sao paulo", "brasil"}:
+            return _SLUG_HG360_SP
+        if valor in {"barcelona", "espanha"}:
+            return _SLUG_HG360_BARCELONA
+        return None
+
+    # ------------------------------------------------------------------
     # Caminho 5 — Paciente modelo
     # ------------------------------------------------------------------
 
@@ -1319,7 +1559,7 @@ class FlowEngine:
 
         # ETAPA 2 — objetivo (menu de 3 opcoes)
         if context.etapa == ETAPA_SISTEMA_OBJETIVO:
-            objetivo = _detectar_objetivo_sistema(user_message)
+            objetivo = await self._resolver_objetivo_sistema(context, user_message)
             if objetivo is None:
                 return await self._reformular_ou_handoff(
                     context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
@@ -1512,7 +1752,7 @@ class FlowEngine:
 
         # Confirmacao de medico (etapa de qualificacao)
         if context.etapa == ETAPA_QUALIF_MEDICO:
-            eh_medico = _detectar_confirmacao(user_message)
+            eh_medico = await self._resolver_eh_medico(context, user_message)
             if eh_medico is not None:
                 context.eh_medico = eh_medico
                 updates["eh_medico"] = eh_medico
@@ -1654,7 +1894,7 @@ class FlowEngine:
 
         # --- Interpretar respostas conforme a etapa corrente ---
         if context.etapa == ETAPA_QUALIF_MEDICO:
-            eh_medico = _detectar_confirmacao(user_message)
+            eh_medico = await self._resolver_eh_medico(context, user_message)
             if eh_medico is not None:
                 context.eh_medico = eh_medico
                 updates["eh_medico"] = eh_medico
@@ -1666,7 +1906,7 @@ class FlowEngine:
                 )
 
         if context.etapa == ETAPA_QUALIF_EXPERIENCIA and context.experiencia_corporal is None:
-            exp = _detectar_experiencia_corporal(user_message)
+            exp = await self._resolver_experiencia_corporal(context, user_message)
             if exp is not None:
                 context.experiencia_corporal = exp
                 updates["experiencia_corporal"] = exp
@@ -1678,7 +1918,7 @@ class FlowEngine:
                 )
 
         if context.etapa == ETAPA_QUALIF_ESPECIALIDADE and not context.especialidade:
-            especialidade = _detectar_especialidade(user_message)
+            especialidade = await self._resolver_especialidade(context, user_message)
             if especialidade is not None:
                 context.especialidade = especialidade
                 updates["especialidade"] = especialidade
@@ -1690,7 +1930,7 @@ class FlowEngine:
                 )
 
         if context.etapa == ETAPA_ESCOLHA_TURMA and not context.produto_interesse:
-            slug_escolhido = _detectar_escolha_turma(user_message)
+            slug_escolhido = await self._resolver_escolha_turma(context, user_message)
             if slug_escolhido:
                 context.produto_interesse = slug_escolhido
                 updates["produto_interesse"] = slug_escolhido

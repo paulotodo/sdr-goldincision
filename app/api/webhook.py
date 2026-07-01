@@ -57,6 +57,12 @@ async def _bump_turnos_sessao(chamado_id: int) -> int:
     retorna o novo valor. Base do orcamento de turnos (US1, FASE 3) e do
     campo `turno_sessao` do evento de observabilidade (US5, FR-015).
 
+    Chamada ANTES de `engine.process()` (nao mais em `finally`): o valor
+    incrementado alimenta `context.turnos_sessao`, consumido pelo
+    FlowEngine no MESMO turno para decidir escalonamento (FR-004) — o
+    evento de observabilidade, ao final, reusa `context.turnos_sessao` em
+    vez de incrementar de novo (evita double-count).
+
     Fail-open (Edge Case: perda de contadores em restart do Redis / erro de
     conexao) — nunca derruba o turno; retorna 0 (tratado como turno nao
     contabilizado, e nao como turno zero real).
@@ -64,12 +70,55 @@ async def _bump_turnos_sessao(chamado_id: int) -> int:
     try:
         redis = _get_redis()
         key = redis_keys.estado_key(chamado_id)
-        val = await redis.hincrby(key, "turnos_sessao", 1)
+        val = await redis.hincrby(key, redis_keys.TURNOS_SESSAO_FIELD, 1)
         return int(val)
     except Exception:
         logger.warning(
             "webhook: falha ao incrementar turnos_sessao chamado_id=%s",
             chamado_id,
+            exc_info=True,
+        )
+        return 0
+
+
+async def _bump_turnos_no_no(chamado_id: int, etapa: Optional[str]) -> int:
+    """
+    Incrementa (ou reseta) `turnos_no_no` no hash `estado:{chamadoId}}` —
+    contador de turnos consecutivos no MESMO no/etapa do mapa-mestre (US1,
+    FASE 3, task 3.1.1/3.1.3).
+
+    Reseta o contador para 1 sempre que a etapa marcada no hash (campo
+    `turnos_no_no_etapa`) difere da etapa corrente — inclusive no 1o turno
+    neste no (marca ausente). Isso implementa o "reset ao mudar
+    etapa_mapa_mestre" (task 3.1.3) sem depender de limpeza explicita de
+    campos antigos: o contador SEMPRE reflete quantos turnos seguidos o
+    lead esta no no atual, nunca acumulando entre nos diferentes.
+
+    Ortogonal ao contador anti-loop `_MAX_TENTATIVAS`/`etapa_funil`
+    (FlowEngine): este conta TODO turno processado no no (reconhecido ou
+    nao); aquele conta apenas respostas NAO reconhecidas — nao se fundem.
+
+    Fail-open (Edge Case: perda de contadores em restart do Redis / erro de
+    conexao) — nunca derruba o turno; retorna 0.
+    """
+    etapa_norm = etapa or ""
+    try:
+        redis = _get_redis()
+        key = redis_keys.estado_key(chamado_id)
+        etapa_anterior = await redis.hget(key, redis_keys.TURNOS_NO_NO_ETAPA_FIELD)
+        if isinstance(etapa_anterior, bytes):
+            etapa_anterior = etapa_anterior.decode("utf-8")
+        if etapa_anterior != etapa_norm:
+            await redis.hset(key, redis_keys.TURNOS_NO_NO_ETAPA_FIELD, etapa_norm)
+            await redis.hset(key, redis_keys.TURNOS_NO_NO_FIELD, 1)
+            return 1
+        val = await redis.hincrby(key, redis_keys.TURNOS_NO_NO_FIELD, 1)
+        return int(val)
+    except Exception:
+        logger.warning(
+            "webhook: falha ao incrementar turnos_no_no chamado_id=%s etapa=%s",
+            chamado_id,
+            etapa_norm,
             exc_info=True,
         )
         return 0
@@ -262,6 +311,16 @@ async def _handle_engine(
             _turno_evt["emit"] = True
             _turno_evt["etapa_entrada"] = context.etapa or ""
 
+            # Orcamento de turnos (US1, FASE 3, FR-001/FR-002): incrementar
+            # os contadores ANTES de engine.process(), para que o MESMO
+            # turno ja veja o valor atualizado ao decidir nudge/handoff
+            # (FlowEngine._aplicar_orcamento_turnos le context.turnos_*).
+            # etapa usada para turnos_no_no e a de ENTRADA (context.etapa,
+            # ainda nao mutada pelo motor) — reflete o no em que o lead
+            # estava ao enviar esta mensagem.
+            context.turnos_sessao = await _bump_turnos_sessao(chamado_id)
+            context.turnos_no_no = await _bump_turnos_no_no(chamado_id, context.etapa)
+
             # Processar com o motor conversacional
             flow_result = await engine.process(context.ticket_id, user_message, context)
 
@@ -276,7 +335,17 @@ async def _handle_engine(
             _turno_evt["etapa_saida"] = flow_result.etapa or _turno_evt["etapa_entrada"]
             _turno_evt["idioma"] = context.idioma
             _turno_evt["intencao"] = context.ultima_intencao
-            _turno_evt["acao"] = "handoff" if flow_result.action == "handoff" else "resposta"
+            # Orcamento de turnos (US1, FASE 3, FR-006): nudge/handoff por
+            # teto de no/sessao marca acao+motivo via FlowResult.turno_acao/
+            # .motivo (FlowEngine._aplicar_orcamento_turnos); demais handoffs
+            # (pedido humano, anti-loop, elegibilidade) seguem "handoff" puro.
+            if flow_result.action == "handoff":
+                _turno_evt["acao"] = "handoff"
+            elif flow_result.turno_acao:
+                _turno_evt["acao"] = flow_result.turno_acao
+            else:
+                _turno_evt["acao"] = "resposta"
+            _turno_evt["motivo"] = flow_result.motivo
             _turno_evt["handoff_destino"] = (
                 flow_result.handoff_destino if flow_result.action == "handoff" else None
             )
@@ -370,12 +439,14 @@ async def _handle_engine(
         finally:
             # Garante exatamente 1 evento por turno processado (SC-007),
             # inclusive quando a excecao acima interrompeu o fluxo (FR-016).
+            # `context.turnos_sessao` ja foi incrementado 1x ANTES de
+            # engine.process() (nao ha novo HINCRBY aqui — evitaria
+            # double-count do mesmo turno).
             if _turno_evt.get("emit"):
-                _turno_sessao_val = await _bump_turnos_sessao(chamado_id)
                 _duracao_ms = int((time.monotonic() - _turno_t0) * 1000)
                 log_turno(
                     chamado_id=chamado_id,
-                    turno_sessao=_turno_sessao_val,
+                    turno_sessao=context.turnos_sessao,
                     etapa_entrada=_turno_evt.get("etapa_entrada") or "",
                     etapa_saida=(
                         _turno_evt.get("etapa_saida")

@@ -116,49 +116,49 @@ completar)
 Ref: Spec FR-001, FR-002; research.md Decision 1, Decision 2, Decision 3;
 data-model.md §Entity Contadores de sessão
 
-- [ ] 3.1.1 Adicionar campos `turnos_sessao`/`turnos_no_no:{etapa}` em
+- [x] 3.1.1 Adicionar campos `turnos_sessao`/`turnos_no_no:{etapa}` em
   `app/core/redis_keys.py` (hash `estado:{chamadoId}`)
-- [ ] 3.1.2 Incrementar via `HINCRBY` exatamente 1x por turno em
+- [x] 3.1.2 Incrementar via `HINCRBY` exatamente 1x por turno em
   `_process_consolidated_messages`/`engine.process`
-- [ ] 3.1.3 Implementar reset do contador por-nó ao detectar mudança de
+- [x] 3.1.3 Implementar reset do contador por-nó ao detectar mudança de
   `etapa_mapa_mestre`
-- [ ] 3.1.4 Implementar fail-open: `HGET` ausente ⇒ tratar como 0 (Edge
+- [x] 3.1.4 Implementar fail-open: `HGET` ausente ⇒ tratar como 0 (Edge
   Case: perda de contadores em restart do Redis)
-- [ ] 3.1.5 Escrever teste garantindo que o contador de turnos é
+- [x] 3.1.5 Escrever teste garantindo que o contador de turnos é
   ortogonal ao contador anti-loop `_MAX_TENTATIVAS` — os dois não se
   fundem (Acceptance Scenario 5, US1)
-- [ ] 3.1.6 Escrever teste de fail-open (contador ausente não bloqueia o
+- [x] 3.1.6 Escrever teste de fail-open (contador ausente não bloqueia o
   atendimento)
 
 ### 3.2 Nudge de nó e limiar elevado de dúvidas `[A]`
 
 Ref: Spec FR-003, FR-005, FR-007; `flow.py`, `config.py`
 
-- [ ] 3.2.1 Implementar checagem de `MAX_TURNOS_NO_NO` em `flow.py` e
+- [x] 3.2.1 Implementar checagem de `MAX_TURNOS_NO_NO` em `flow.py` e
   injetar nudge cordial i18n (`_T`/`_t`) sem interromper a conversa
-- [ ] 3.2.2 Implementar limiar diferenciado `MAX_TURNOS_DUVIDAS` para a
+- [x] 3.2.2 Implementar limiar diferenciado `MAX_TURNOS_DUVIDAS` para a
   etapa de dúvidas abertas
-- [ ] 3.2.3 Escrever teste: nudge disparado exatamente no teto de nó,
+- [x] 3.2.3 Escrever teste: nudge disparado exatamente no teto de nó,
   sem handoff (Acceptance Scenario 2, US1)
-- [ ] 3.2.4 Escrever teste: ausência de nudge em dúvidas abaixo do teto
+- [x] 3.2.4 Escrever teste: ausência de nudge em dúvidas abaixo do teto
   elevado (Acceptance Scenario 4, US1)
 
 ### 3.3 Handoff de sessão com precedência sobre nudge de nó `[C]`
 
 Ref: Spec FR-004, FR-006, FR-020; Edge Cases item 1 (colisão sessão+nó)
 
-- [ ] 3.3.1 Implementar checagem de `MAX_TURNOS_SESSAO` em `flow.py`,
+- [x] 3.3.1 Implementar checagem de `MAX_TURNOS_SESSAO` em `flow.py`,
   com `FlowResult.handoff_destino` sempre proveniente da allowlist/config
   (`handoff_queue_ids_json`), nunca do LLM
-- [ ] 3.3.2 Implementar precedência: teto de sessão prevalece sobre teto
+- [x] 3.3.2 Implementar precedência: teto de sessão prevalece sobre teto
   de nó/dúvidas quando ambos são atingidos no mesmo turno
-- [ ] 3.3.3 Registrar campo `motivo` (`turnos_no_no`\|`turnos_sessao`) no
+- [x] 3.3.3 Registrar campo `motivo` (`turnos_no_no`\|`turnos_sessao`) no
   `log_turno` ao disparar nudge/handoff (FR-006)
-- [ ] 3.3.4 Escrever teste de handoff no teto de sessão com destino
+- [x] 3.3.4 Escrever teste de handoff no teto de sessão com destino
   lógico válido (Acceptance Scenario 3, US1; SC-002)
-- [ ] 3.3.5 Escrever teste de colisão simultânea teto-sessão + teto-nó
+- [x] 3.3.5 Escrever teste de colisão simultânea teto-sessão + teto-nó
   ⇒ handoff de sessão prevalece (Edge Case item 1)
-- [ ] 3.3.6 Escrever teste garantindo que `handoff_destino` nunca é
+- [x] 3.3.6 Escrever teste garantindo que `handoff_destino` nunca é
   decidido pelo LLM (assert contra allowlist estática, não contra saída
   do modelo)
 

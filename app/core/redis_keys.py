@@ -24,6 +24,15 @@ IDEMP_TTL_SECONDS = 86_400          # 24h — idempotencia de evento
 LOCK_TTL_MS = 30_000                # 30s em ms — lock por ticket (ver settings.lock_ttl_ms)
 HOT_WINDOW_TTL_SECONDS = 7_200      # 2h — janela quente de sessao
 
+# ---------------------------------------------------------------------------
+# Campos do hash `estado:{chamadoId}` — orcamento de turnos (US1, FASE 3,
+# task 3.1.1). Nao sao chaves Redis proprias: vivem dentro do hash retornado
+# por `estado_key()`, ao lado das demais variaveis de cache de estado.
+# ---------------------------------------------------------------------------
+TURNOS_SESSAO_FIELD = "turnos_sessao"            # contador de turnos da sessao inteira
+TURNOS_NO_NO_FIELD = "turnos_no_no"              # contador de turnos no NO/etapa corrente
+TURNOS_NO_NO_ETAPA_FIELD = "turnos_no_no_etapa"  # marca qual etapa o contador acima referencia
+
 
 def idemp_key(chamado_id: int, payload_hash: str) -> str:
     """

@@ -36,6 +36,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.intent import INTENCAO_PARA_CAMINHO, ClassificacaoIntencao, IntentClassifier
 from app.core.memory import MemoryManager, SessionContext
 from app.core.responder import GroundedResponder
@@ -148,6 +149,33 @@ DEST_SUPORTE = "suporte"            # equipe de suporte ao aluno (C4)
 
 # Limite de tentativas nao reconhecidas por etapa antes de encaminhar a humano.
 _MAX_TENTATIVAS = 3
+
+# Destino LOGICO de handoff por CAMINHO ativo, usado pelo orcamento de turnos
+# (US1, FR-004/FR-020) quando o teto de turnos-de-sessao e atingido — sempre
+# resolvido a partir desta allowlist estatica, NUNCA decidido pelo LLM
+# (SEC-LLM-3). Fallback generico (DEST_CONSULTORES) para caminho
+# desconhecido/None (Edge Case: sessao ainda sem caminho definido).
+_DESTINO_POR_CAMINHO: dict[int, str] = {
+    CaminhoMapaMestre.CURSO_ONLINE_HG: DEST_CONSULTORES,
+    CaminhoMapaMestre.CURSOS_PRESENCIAIS: DEST_PRESENCIAL,
+    CaminhoMapaMestre.SISTEMA_GOLDINCISION: DEST_ESPECIALISTA,
+    CaminhoMapaMestre.ALUNO_SUPORTE: DEST_SUPORTE,
+    CaminhoMapaMestre.PACIENTE_MODELO: DEST_CONSULTORES,
+    CaminhoMapaMestre.OUTRO_ASSUNTO: DEST_CONSULTORES,
+}
+
+
+def _destino_logico_por_caminho(caminho: Optional[int]) -> str:
+    """
+    Destino logico de handoff por caminho ativo (US1, FR-004).
+
+    Sempre resolvido pela allowlist estatica `_DESTINO_POR_CAMINHO` — nunca
+    decidido pelo LLM (SEC-LLM-3). Caminho None/desconhecido cai no fallback
+    generico DEST_CONSULTORES.
+    """
+    if caminho is None:
+        return DEST_CONSULTORES
+    return _DESTINO_POR_CAMINHO.get(caminho, DEST_CONSULTORES)
 
 
 # ---------------------------------------------------------------------------
@@ -635,6 +663,43 @@ _T: dict[str, dict[str, str]] = {
         "en": "👉 And, as the recommended learning path, here is the HG360 too:",
         "es": "👉 Y, como ruta de evolución recomendada, mira también el HG360:",
     },
+    # Orcamento de turnos (US1, FASE 3) — nudge de no: reforca a oferta de
+    # conexao com especialista SEM encerrar a conversa (FR-003).
+    "turnos_no_no_nudge": {
+        "pt": (
+            "A propósito, se preferir agilizar, posso conectar você agora mesmo "
+            "com um de nossos especialistas — mas fico à disposição para "
+            "continuar por aqui também. 😊"
+        ),
+        "en": (
+            "By the way, if you'd like to speed things up, I can connect you "
+            "with one of our specialists right now — but I'm happy to keep "
+            "going here too. 😊"
+        ),
+        "es": (
+            "Por cierto, si prefieres agilizar, puedo conectarte ahora mismo "
+            "con uno de nuestros especialistas — pero quedo a tu disposición "
+            "para continuar por aquí también. 😊"
+        ),
+    },
+    # Orcamento de turnos (US1, FASE 3) — handoff cordial por teto de sessao
+    # (FR-004), distinto do "desistir_handoff" do anti-loop por etapa.
+    "turnos_sessao_handoff": {
+        "pt": (
+            "Para dar a você um atendimento ainda mais completo, vou conectar "
+            "você agora com um de nossos especialistas, que continua "
+            "pessoalmente. 🙏"
+        ),
+        "en": (
+            "To give you an even more complete experience, I'll connect you "
+            "now with one of our specialists, who will continue personally. 🙏"
+        ),
+        "es": (
+            "Para darte una atención aún más completa, voy a conectarte ahora "
+            "con uno de nuestros especialistas, que continuará "
+            "personalmente. 🙏"
+        ),
+    },
 }
 
 
@@ -769,6 +834,8 @@ class FlowResult:
         updates: Optional[dict] = None,
         handoff_destino: Optional[str] = None,
         handoff_motivo: Optional[str] = None,
+        turno_acao: Optional[str] = None,
+        motivo: Optional[str] = None,
     ):
         self.response_text = response_text
         self.action = action
@@ -779,6 +846,14 @@ class FlowResult:
         # config; NUNCA vem do LLM — SEC-LLM-3). So relevante quando action="handoff".
         self.handoff_destino = handoff_destino
         self.handoff_motivo = handoff_motivo
+        # Orcamento de turnos (US1, FASE 3, FR-006): sinaliza para o chamador
+        # (webhook.py) que `acao` do evento de observabilidade deve ser
+        # "nudge" (result.action permanece "continue" — nudge NAO e handoff).
+        # `motivo` ∈ {"turnos_no_no", "turnos_sessao"} quando aplicavel;
+        # distinto de `handoff_motivo` (motivo de negocio do handoff, ex.:
+        # "pedido_humano", usado tambem para persistencia em Ticket).
+        self.turno_acao = turno_acao
+        self.motivo = motivo
 
 
 class FlowEngine:
@@ -808,7 +883,24 @@ class FlowEngine:
     async def process(
         self, ticket_id: int, user_message: str, context: SessionContext
     ) -> FlowResult:
-        """Processa a mensagem do lead e retorna FlowResult (resposta + acao + updates)."""
+        """
+        Processa a mensagem do lead e retorna FlowResult (resposta + acao + updates).
+
+        Ponto de entrada UNICO do motor (US1, FASE 3): delega a maquina de
+        estados a `_process_core` e, ao final, aplica o orcamento de turnos
+        (nudge/handoff por teto de no ou de sessao — FR-003 a FR-006) sobre o
+        resultado, usando os contadores `context.turnos_sessao`/
+        `context.turnos_no_no` ja incrementados 1x por turno pelo chamador
+        (webhook.py, ANTES desta chamada — FR-002).
+        """
+        result = await self._process_core(ticket_id, user_message, context)
+        return self._aplicar_orcamento_turnos(context, result)
+
+    async def _process_core(
+        self, ticket_id: int, user_message: str, context: SessionContext
+    ) -> FlowResult:
+        """Maquina de estados do Mapa Mestre (inalterada) — ver `process` para o
+        orcamento de turnos aplicado ao resultado final."""
         updates: dict = {}
 
         # 1. Classificar intencao / detectar idioma
@@ -929,6 +1021,68 @@ class FlowEngine:
         # Fallback
         menu_text = await self._responder.generate_menu(context.idioma)
         return FlowResult(menu_text, "continue", None, ETAPA_MENU, updates)
+
+    # ------------------------------------------------------------------
+    # Orcamento de turnos (US1, FASE 3 — FR-001 a FR-007)
+    # ------------------------------------------------------------------
+
+    def _aplicar_orcamento_turnos(
+        self, context: SessionContext, result: FlowResult,
+    ) -> FlowResult:
+        """
+        Aplica o escalonamento de orcamento de turnos sobre o resultado ja
+        computado pela maquina de estados (`_process_core`).
+
+        Contadores (`context.turnos_sessao`/`context.turnos_no_no`) sao
+        incrementados 1x por turno pelo CALLER (webhook.py `_handle_engine`,
+        via HINCRBY fail-open em Redis — reusa `_bump_turnos_sessao`),
+        ortogonais ao contador anti-loop `_MAX_TENTATIVAS`/`etapa_funil`
+        (FR-001, Acceptance Scenario 5 US1) — nunca fundidos aqui.
+
+        Precedencia (FR-004, Edge Case item 1 — colisao teto-sessao +
+        teto-no no mesmo turno): teto de SESSAO sempre prevalece.
+
+        Nunca escalona sobre um resultado que JA e handoff (pedido explicito
+        de humano — Regra 26; ou anti-loop `_MAX_TENTATIVAS` esgotado) — nao
+        ha o que reforcar sobre uma escalada ja em curso.
+        """
+        if result.action == "handoff":
+            return result
+
+        etapa_corrente = context.etapa or ""
+
+        # 1. Teto de SESSAO (precedencia maxima — FR-004, FR-020/SEC-LLM-3:
+        #    destino sempre da allowlist estatica, nunca do LLM).
+        if context.turnos_sessao >= settings.max_turnos_sessao:
+            destino = _destino_logico_por_caminho(result.caminho or context.caminho)
+            handoff_result = self._handoff(
+                context, result.updates,
+                result.caminho or context.caminho,
+                _t("turnos_sessao_handoff", context.idioma),
+                etapa=ETAPA_HANDOFF, destino=destino, motivo="turnos_sessao",
+            )
+            handoff_result.motivo = "turnos_sessao"
+            return handoff_result
+
+        # 2. Nudge de no (FR-003) com limiar diferenciado para duvidas
+        #    abertas (FR-005) — nunca corta uma duvida legitima. Aplica-se a
+        #    qualquer no/etapa com pergunta ou escolha pendente (inclusive o
+        #    menu inicial); nao se aplica a etapas ja terminais (handoff) nem
+        #    ao turno 1 (sem etapa ainda — `etapa_corrente` vazio).
+        if etapa_corrente and etapa_corrente != ETAPA_HANDOFF:
+            limiar_no = (
+                settings.max_turnos_duvidas if etapa_corrente == ETAPA_DUVIDAS
+                else settings.max_turnos_no_no
+            )
+            if context.turnos_no_no >= limiar_no:
+                nudge_txt = _t("turnos_no_no_nudge", context.idioma)
+                result.response_text = (
+                    (result.response_text or "").rstrip() + "\n\n" + nudge_txt
+                ).strip()
+                result.turno_acao = "nudge"
+                result.motivo = "turnos_no_no"
+
+        return result
 
     # ------------------------------------------------------------------
     # Helpers de resultado

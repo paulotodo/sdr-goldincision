@@ -261,10 +261,10 @@ Ref: `plan.md` Estratégia de testes (RESTRIÇÃO INVIOLÁVEL)
 
 Ref: `plan.md` §Pré-condição de merge/deploy (dec-013, FR-024-INFRA-PRECONDITION); RESTRIÇÕES INVIOLÁVEIS
 
-- [ ] 10.3.1 Commitar todas as mudanças na branch `feature/sdr-rag-hibrido`
-- [ ] 10.3.2 Abrir PR contra `master` (protegido) com resumo do escopo (RAG híbrido, tabela `chunk`, `HybridRetriever`, rastreabilidade) — NÃO mergear
-- [ ] 10.3.3 Reproduzir no corpo do PR a seção "⚠️ Pré-condição de merge/deploy" do `plan.md` NA ÍNTEGRA: trocar a imagem do serviço `postgres` em `stack.yml` de `postgres:16-alpine` para `pgvector/pgvector:pg16`, redeploy SOMENTE desse serviço (`sdr-whatsapp_postgres`), executado pelo operador na janela de infraestrutura dele — NENHUM outro serviço/stack (`fia`, `n8n`, `pgadmin`, `postgres_postgres`, `envio-massa`, `fast-api`, `portainer`, `traefik`, `metanoia`) tocado
-- [ ] 10.3.4 Vincular o PR à spec/plan/data-model/checklist/tasks desta feature na descrição
+- [x] 10.3.1 Commitar todas as mudanças na branch `feature/sdr-rag-hibrido` <!-- commit e4c35b7 -->
+- [x] 10.3.2 Abrir PR contra `master` (protegido) com resumo do escopo (RAG híbrido, tabela `chunk`, `HybridRetriever`, rastreabilidade) — NÃO mergear <!-- PR #14: https://github.com/paulotodo/sdr-goldincision/pull/14 (aberto, NAO mergeado) -->
+- [x] 10.3.3 Reproduzir no corpo do PR a seção "⚠️ Pré-condição de merge/deploy" do `plan.md` NA ÍNTEGRA: trocar a imagem do serviço `postgres` em `stack.yml` de `postgres:16-alpine` para `pgvector/pgvector:pg16`, redeploy SOMENTE desse serviço (`sdr-whatsapp_postgres`), executado pelo operador na janela de infraestrutura dele — NENHUM outro serviço/stack (`fia`, `n8n`, `pgadmin`, `postgres_postgres`, `envio-massa`, `fast-api`, `portainer`, `traefik`, `metanoia`) tocado <!-- stack.yml ja troca a imagem no repo (este PR); redeploy fica a cargo do operador -->
+- [x] 10.3.4 Vincular o PR à spec/plan/data-model/checklist/tasks desta feature na descrição <!-- secao "Artefatos da feature" no corpo do PR #14 -->
 
 ---
 

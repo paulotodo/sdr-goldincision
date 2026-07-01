@@ -9,6 +9,8 @@ Cobre:
 - Payload malformado + retry -> handoff=True na 2a falha (FR-002/FR-003).
 - Temperatura baixa (0-0.2) em contexto factual; padrao (0.3) fora dele (FR-004).
 - Divergencia de idioma do pacote conta como pacote invalido (FR-005).
+- Portao de Fidelidade (Pilar 7, FASE 2): condicao comercial aciona o portao;
+  duvida neutra nao aciona; reprovacao -> bloco canonico + handoff (FR-008..FR-012).
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.core.contracts import RespostaEstruturada
+from app.core.fidelity import FidelityGate, VeredictoFidelidade
 from app.core.responder import (
     _SYSTEM_BASE,
     REASONING_MAX_TOKENS,
@@ -332,3 +335,139 @@ async def test_generate_erro_de_api_e_tratado_como_tentativa_malformada():
 
     assert texto == "Recuperado."
     assert handoff is False
+
+
+# ---------------------------------------------------------------------------
+# Portao de Fidelidade (FASE 2 — FR-008..FR-012, task 2.3)
+# ---------------------------------------------------------------------------
+
+
+def _make_fidelity_gate(fiel: bool, afirmacoes: list[str] | None = None) -> FidelityGate:
+    """FidelityGate real cujo openai_client interno e mockado, para exercitar
+    a integracao completa (gatilho -> verificar -> veredito) sem duplicar a
+    logica do portao no teste do responder."""
+    veredito_json = VeredictoFidelidade(
+        fiel=fiel, afirmacoes_nao_sustentadas=afirmacoes or []
+    ).model_dump_json()
+    client = AsyncMock()
+    client.chat_cheap_json = AsyncMock(return_value=veredito_json)
+    return FidelityGate(openai_client=client)
+
+
+@pytest.mark.asyncio
+async def test_generate_condicao_comercial_aciona_portao_e_aprova():
+    """Resposta que toca condicao comercial (dec-010) aciona o portao; fiel=true
+    -> texto original e enviado normalmente (FR-008/FR-009)."""
+    client = _make_openai_mock(
+        _pacote_json(texto="O valor do curso é R$ 5.000 à vista.")
+    )
+    gate = _make_fidelity_gate(fiel=True)
+    responder = GroundedResponder(openai_client=client, fidelity_gate=gate)
+
+    texto, handoff = await responder.generate(
+        user_message="qual o preço?",
+        caminho="hg360-sp",
+        etapa="duvidas",
+        knowledge_context="O curso HG360 custa R$ 5.000 à vista.",
+        idioma="pt",
+    )
+
+    assert texto == "O valor do curso é R$ 5.000 à vista."
+    assert handoff is False
+    gate._client.chat_cheap_json.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_portao_reprovado_cai_no_bloco_canonico_e_handoff():
+    """fiel=false -> NAO envia o texto reprovado; cai no bloco canonico
+    'informacao indisponivel' com precisa_handoff=True (fail-closed, FR-012)."""
+    client = _make_openai_mock(
+        _pacote_json(texto="O valor do curso é R$ 3.000 à vista.")
+    )
+    gate = _make_fidelity_gate(
+        fiel=False, afirmacoes=["valor do curso é R$ 3.000"]
+    )
+    responder = GroundedResponder(openai_client=client, fidelity_gate=gate)
+
+    texto, handoff = await responder.generate(
+        user_message="qual o preço?",
+        caminho="hg360-sp",
+        etapa="duvidas",
+        knowledge_context="O curso HG360 custa R$ 5.000 à vista.",
+        idioma="pt",
+    )
+
+    assert texto != "O valor do curso é R$ 3.000 à vista."
+    assert (
+        "não tenho essa informação" in texto.lower()
+        or "nao tenho essa informacao" in texto.lower()
+    )
+    assert handoff is True
+
+
+@pytest.mark.asyncio
+async def test_generate_duvida_neutra_nao_aciona_portao():
+    """Resposta sem condicao comercial (FR-011) NAO aciona o portao — o client
+    mockado do gate nunca e chamado."""
+    client = _make_openai_mock(
+        _pacote_json(texto="O curso aborda técnicas avançadas de harmonização.")
+    )
+    gate = _make_fidelity_gate(fiel=True)
+    responder = GroundedResponder(openai_client=client, fidelity_gate=gate)
+
+    texto, handoff = await responder.generate(
+        user_message="do que se trata o curso?",
+        caminho="hg360-sp",
+        etapa="duvidas",
+        knowledge_context="Base.",
+        idioma="pt",
+    )
+
+    assert texto == "O curso aborda técnicas avançadas de harmonização."
+    assert handoff is False
+    gate._client.chat_cheap_json.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_sem_fidelity_gate_configurado_nao_verifica():
+    """Retrocompatibilidade: fidelity_gate=None (default) desativa o portao —
+    resposta com condicao comercial e enviada sem verificacao (instancias que
+    nao cobrem este pilar, ex.: testes legados)."""
+    client = _make_openai_mock(
+        _pacote_json(texto="O valor do curso é R$ 5.000 à vista.")
+    )
+    responder = GroundedResponder(openai_client=client)  # sem fidelity_gate
+
+    texto, handoff = await responder.generate(
+        user_message="qual o preço?",
+        caminho="hg360-sp",
+        etapa="duvidas",
+        knowledge_context="Base.",
+        idioma="pt",
+    )
+
+    assert texto == "O valor do curso é R$ 5.000 à vista."
+    assert handoff is False
+
+
+@pytest.mark.asyncio
+async def test_generate_verbatim_nunca_passa_pelo_portao():
+    """Blocos verbatim (menu/apresentacao/paciente-modelo) sao gerados por
+    metodos dedicados (generate_menu/generate_not_eligible/
+    generate_paciente_modelo) que NUNCA chamam generate() nem o LLM — logo
+    nunca passam pelo Portao de Fidelidade (mesma excecao do FR-007/FR-012)."""
+    client = _make_openai_mock()
+    gate = _make_fidelity_gate(fiel=False, afirmacoes=["qualquer coisa"])
+    responder = GroundedResponder(openai_client=client, fidelity_gate=gate)
+
+    menu = await responder.generate_menu(idioma="pt")
+    nao_elegivel = await responder.generate_not_eligible(idioma="pt")
+    paciente = await responder.generate_paciente_modelo(
+        nidia_phone="5511999999999", idioma="pt"
+    )
+
+    assert "GoldIncision" in menu
+    assert "médicos" in nao_elegivel or "medicos" in nao_elegivel
+    assert "5511999999999" in paciente
+    gate._client.chat_cheap_json.assert_not_awaited()
+    client.chat_reasoning_json.assert_not_awaited()

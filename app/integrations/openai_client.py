@@ -131,6 +131,54 @@ class OpenAIClient:
         )
         return content.strip()
 
+    async def chat_cheap_json(
+        self,
+        messages: list[dict],
+        response_model: type["BaseModel"],
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+    ) -> str:
+        """
+        Gera resposta ESTRUTURADA usando o modelo BARATO (gpt-4o-mini) via
+        `response_format=json_schema` (Structured Outputs) — usado pelo
+        `FidelityGate.verificar()` (Pilar 7, FR-009) e por `SlotExtractor`
+        (Pilar 8, FR-014).
+
+        Mesma abordagem de `chat_reasoning_json`, mas roteada ao modelo
+        barato (custo/latencia menores; classificacao/verificacao, nunca
+        redacao — FR-001/FR-005 do routing).
+
+        Retorna o JSON bruto (string); validacao/parsing contra o modelo
+        Pydantic e responsabilidade do chamador.
+        """
+        schema = response_model.model_json_schema()
+        schema["additionalProperties"] = False
+        schema["required"] = list(schema.get("properties", {}).keys())
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": response_model.__name__,
+                "schema": schema,
+                "strict": True,
+            },
+        }
+        response = await self._client.chat.completions.create(
+            model=self._model_cheap,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            response_format=response_format,
+        )
+        content = response.choices[0].message.content or ""
+        logger.debug(
+            "chat_cheap_json: model=%s schema=%s tokens_in=%s tokens_out=%s",
+            self._model_cheap,
+            response_model.__name__,
+            response.usage.prompt_tokens if response.usage else "?",
+            response.usage.completion_tokens if response.usage else "?",
+        )
+        return content.strip()
+
     async def transcribe_audio(self, audio_bytes: bytes, filename: str = "audio.ogg") -> str:
         """
         Transcreve audio via Whisper API (FR-005, SC-007).

@@ -83,6 +83,9 @@ services:
       INTER_BLOCK_DELAY_SECONDS: "${INTER_BLOCK_DELAY_SECONDS:-1.0}"
       # Concisao das respostas geradas (teto de tokens do raciocinio).
       REASONING_MAX_TOKENS: "${REASONING_MAX_TOKENS:-280}"
+      # Portao de Fidelidade (Pilar 7): teto (hard) do FidelityGate.verificar();
+      # timeout/erro conta SEMPRE como fiel=False (fail-closed).
+      VERIFY_TIMEOUT_SECONDS: "${VERIFY_TIMEOUT_SECONDS:-3}"
     deploy:
       replicas: 1
       restart_policy:

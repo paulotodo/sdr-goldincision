@@ -139,6 +139,12 @@ class Settings(BaseSettings):
     # Limite de tokens da geracao de raciocinio: respostas objetivas e resumidas.
     reasoning_max_tokens: int = 280
 
+    # --- Portao de Fidelidade (Pilar 7, FR-008..FR-012) ---
+    # Teto (hard) do FidelityGate.verificar() — timeout/erro/indisponibilidade
+    # e SEMPRE tratado como fiel=False (fail-closed), nunca aprovacao por
+    # omissao. Alvo interno de latencia real: ~2s (Clarifications Q3/dec-011).
+    verify_timeout_seconds: int = 3
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v: str) -> str:

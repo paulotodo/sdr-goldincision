@@ -252,6 +252,7 @@ async def _handle_engine(
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.config import settings as cfg
+    from app.core.fidelity import FidelityGate
     from app.core.flow import FlowEngine, _tent_count
     from app.core.intent import IntentClassifier
     from app.core.memory import MemoryManager
@@ -337,9 +338,14 @@ async def _handle_engine(
                 openai_client=openai_client,
             )
             intent_classifier = IntentClassifier(openai_client=openai_client)
+            fidelity_gate = FidelityGate(
+                openai_client=openai_client,
+                timeout_seconds=cfg.verify_timeout_seconds,
+            )
             responder = GroundedResponder(
                 openai_client=openai_client,
                 max_tokens=cfg.reasoning_max_tokens,
+                fidelity_gate=fidelity_gate,
             )
             engine = FlowEngine(
                 db_session=db_session,

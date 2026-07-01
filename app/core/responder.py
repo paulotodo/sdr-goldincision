@@ -17,6 +17,7 @@ import logging
 from typing import Any, Optional
 
 from app.core.contracts import RespostaEstruturada
+from app.core.fidelity import FidelityGate, gatilho_condicao_comercial
 
 logger = logging.getLogger(__name__)
 
@@ -189,11 +190,19 @@ class GroundedResponder:
     """
 
     def __init__(
-        self, openai_client: Any, max_tokens: int = REASONING_MAX_TOKENS
+        self,
+        openai_client: Any,
+        max_tokens: int = REASONING_MAX_TOKENS,
+        fidelity_gate: Optional[FidelityGate] = None,
     ) -> None:
         self._client = openai_client
         # Teto de concisao para a geracao de raciocinio (respostas resumidas).
         self._max_tokens = max_tokens
+        # Portao de Fidelidade (Pilar 7, FR-008..FR-012): opcional para
+        # retrocompatibilidade com testes/instancias que nao cobrem este
+        # pilar. Producao SEMPRE injeta um (app/api/webhook.py). None
+        # desativa o portao (equivalente a sempre aprovar a resposta gerada).
+        self._fidelity_gate = fidelity_gate
 
     async def generate(
         self,
@@ -347,6 +356,24 @@ class GroundedResponder:
             len(pacote.texto),
         )
 
+        # Portao de Fidelidade (Pilar 7, FR-008..FR-012): so aciona quando o
+        # texto JA REDIGIDO toca condicao comercial (dec-010) — verbatim/
+        # rapport nunca chegam aqui (nunca acionam o gatilho). Fail-closed:
+        # gate reprovado -> NAO envia o texto gerado, cai no bloco canonico
+        # "informacao indisponivel" + handoff (nunca conteudo nao sustentado).
+        if self._fidelity_gate is not None and gatilho_condicao_comercial(pacote.texto):
+            veredito = await self._fidelity_gate.verificar(pacote.texto, knowledge_context)
+            if not veredito.fiel:
+                logger.warning(
+                    "responder: portao de fidelidade reprovou a resposta gerada "
+                    "(condicao comercial sem sustentacao na base) -> bloco "
+                    "canonico + handoff. caminho=%s etapa=%s n_afirmacoes_nao_sustentadas=%s",
+                    caminho,
+                    etapa,
+                    len(veredito.afirmacoes_nao_sustentadas),
+                )
+                return _fallback_indisponivel_response(idioma), True
+
         # FR-006: FlowEngine nunca ve o objeto RespostaEstruturada, so a 2-tupla.
         return pacote.texto, pacote.precisa_handoff
 
@@ -468,4 +495,28 @@ def _fallback_error_response(idioma: str) -> str:
         return (
             "Estou com uma instabilidade momentânea. Tente novamente em instantes "
             "ou posso encaminhar para nossa equipe."
+        )
+
+
+def _fallback_indisponivel_response(idioma: str) -> str:
+    """
+    Bloco canonico "informacao indisponivel" (FR-012, Pilar 7): usado quando o
+    Portao de Fidelidade reprova a resposta gerada (condicao comercial sem
+    sustentacao explicita na base oficial). NUNCA envia o texto reprovado —
+    fail-closed: erro/duvida de groundedness == recusa + handoff.
+    """
+    if idioma == "en":
+        return (
+            "I don't have that information confirmed right now. "
+            "I'll connect you with our team so they can help with the exact details."
+        )
+    elif idioma == "es":
+        return (
+            "No tengo esa información confirmada en este momento. "
+            "Voy a conectarte con nuestro equipo para que te ayude con los detalles exactos."
+        )
+    else:
+        return (
+            "Não tenho essa informação confirmada no momento. "
+            "Vou encaminhar você para nossa equipe para confirmar os detalhes exatos."
         )

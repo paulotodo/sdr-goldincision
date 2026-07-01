@@ -51,3 +51,16 @@ def test_turnos_config_types_are_int():
         "lock_ttl_ms",
     ):
         assert isinstance(getattr(s, field), int), f"{field} deveria ser int"
+
+
+def test_verify_timeout_seconds_default():
+    """Portao de Fidelidade (FASE 2, task 2.2.1): default hard = 3s."""
+    s = Settings()
+    assert s.verify_timeout_seconds == 3
+    assert isinstance(s.verify_timeout_seconds, int)
+
+
+def test_verify_timeout_seconds_override_via_env(monkeypatch):
+    monkeypatch.setenv("VERIFY_TIMEOUT_SECONDS", "5")
+    s = Settings()
+    assert s.verify_timeout_seconds == 5

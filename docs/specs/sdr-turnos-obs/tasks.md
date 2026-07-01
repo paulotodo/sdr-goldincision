@@ -267,29 +267,29 @@ Ref: Spec FR-013, FR-014; research.md Decision 4; `locks.py`,
 Ref: Spec FR-017; research.md Decision 7;
 `agente-atendimento-confiavel/padroes-implementacao.md §7`
 
-- [ ] 7.1.1 Criar `tests/golden/casos/*.json` com 30 a 50 casos derivados
+- [x] 7.1.1 Criar `tests/golden/casos/*.json` com 30 a 50 casos derivados
   de cenários reais de teste e dos caminhos oficiais da jornada (SC-008)
-- [ ] 7.1.2 Cada caso define `mensagem`, `estado_inicial`,
+- [x] 7.1.2 Cada caso define `mensagem`, `estado_inicial`,
   `esperado.proxima_acao`, `esperado.etapa`, `esperado.nao_repetir_slot`
-- [ ] 7.1.3 Incluir casos de abstenção (mensagem fora da Base Oficial de
+- [x] 7.1.3 Incluir casos de abstenção (mensagem fora da Base Oficial de
   Conhecimento) com `esperado.abster=true`
-- [ ] 7.1.4 Incluir casos de anti-alucinação de preço com
+- [x] 7.1.4 Incluir casos de anti-alucinação de preço com
   `esperado.sem_preco_inventado=true`
 
 ### 7.2 Harness de execução do golden set `[M]`
 
 Ref: Spec FR-018; research.md Decision 7; tarefa 1.2 (limiar de aceitação)
 
-- [ ] 7.2.1 Implementar `tests/golden/test_golden_runner.py` usando o
+- [x] 7.2.1 Implementar `tests/golden/test_golden_runner.py` usando o
   **FlowEngine REAL** (`StubFlowEngine` stuba só I/O de DB — nunca
   mockar o motor)
-- [ ] 7.2.2 Marcar a suíte com `@pytest.mark.golden` e excluir do gate
+- [x] 7.2.2 Marcar a suíte com `@pytest.mark.golden` e excluir do gate
   de CI padrão (suíte separada, não bloqueia merge se instável)
-- [ ] 7.2.3 Implementar relatório de taxa de acerto por dimensão (fluxo
+- [x] 7.2.3 Implementar relatório de taxa de acerto por dimensão (fluxo
   correto, abstenção correta, ausência de preço inventado)
-- [ ] 7.2.4 Aplicar a decisão de limiar de aceitação definida na tarefa
+- [x] 7.2.4 Aplicar a decisão de limiar de aceitação definida na tarefa
   1.2 (threshold bloqueante ou apenas informativo)
-- [ ] 7.2.5 Documentar comando de execução
+- [x] 7.2.5 Documentar comando de execução
   (`python3 -m pytest tests/golden -m golden`) em `quickstart.md`/README
 
 ---

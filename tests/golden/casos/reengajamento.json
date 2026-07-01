@@ -1,0 +1,98 @@
+{
+  "casos": [
+    {
+      "id": "reengajamento_retomada_preserva_etapa_pt",
+      "dimensao": "reengajamento",
+      "mensagem": "ainda tenho uma dúvida sobre carga horária",
+      "estado_inicial": {
+        "caminho": 1, "etapa": "duvidas", "eh_medico": true, "horas_inatividade": 30
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {"texto": "A carga horária é de 40 horas.", "handoff": false},
+      "knowledge": "BASE",
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "turno_acao": "retomada",
+        "nao_repetir_slot": {"eh_medico": true},
+        "contains": ["Oi de novo", "carga horária é de 40 horas"]
+      }
+    },
+    {
+      "id": "reengajamento_sessao_nova_reseta_etapa_preserva_perfil",
+      "dimensao": "reengajamento",
+      "mensagem": "oi",
+      "estado_inicial": {
+        "caminho": 1, "etapa": "duvidas", "eh_medico": true,
+        "especialidade": "dermatologia", "nome": "Ana",
+        "perfil": {"cidade": "SP"}, "horas_inatividade": 100
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "menu",
+        "caminho": null,
+        "turno_acao": "sessao_nova",
+        "contains": ["MENU"],
+        "nao_repetir_slot": {
+          "eh_medico": true,
+          "especialidade": "dermatologia",
+          "perfil.cidade": "SP"
+        }
+      }
+    },
+    {
+      "id": "reengajamento_normal_gap_curto_sem_mensagem_extra",
+      "dimensao": "reengajamento",
+      "mensagem": "sim, sou médico",
+      "estado_inicial": {"caminho": 1, "etapa": "qualif_medico", "horas_inatividade": 5},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "turno_acao": null,
+        "not_contains": ["Oi de novo"]
+      }
+    },
+    {
+      "id": "reengajamento_gap_none_primeiro_turno_normal",
+      "dimensao": "reengajamento",
+      "mensagem": "oi",
+      "estado_inicial": {"caminho": null, "horas_inatividade": null},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "menu",
+        "turno_acao": null,
+        "contains": ["MENU"]
+      }
+    },
+    {
+      "id": "reengajamento_retomada_en",
+      "dimensao": "reengajamento",
+      "mensagem": "still have a question about duration",
+      "estado_inicial": {
+        "caminho": 1, "etapa": "duvidas", "eh_medico": true,
+        "idioma": "en", "horas_inatividade": 30
+      },
+      "intent": {"intencao": "ambigua", "idioma": "en"},
+      "responder": {"texto": "The duration is 40 hours.", "handoff": false},
+      "knowledge": "BASE",
+      "esperado": {
+        "proxima_acao": "continue",
+        "turno_acao": "retomada",
+        "contains": ["Hi again", "duration is 40 hours"]
+      }
+    },
+    {
+      "id": "reengajamento_nao_aplica_sobre_pedido_humano",
+      "dimensao": "reengajamento",
+      "mensagem": "quero falar com um atendente",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "horas_inatividade": 30},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "turno_acao": null
+      }
+    }
+  ]
+}

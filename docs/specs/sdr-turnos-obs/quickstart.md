@@ -86,22 +86,47 @@ conforme a suíte existente). Não mockar o motor.
 
 ## Cenário 10 — Golden set roda e reporta (US6 / FR-017/018)
 
-1. Executar `python3 -m pytest tests/golden -m golden`.
-   **Expected**: relatório por dimensão (fluxo correto, abstenção correta,
-   zero preço inventado); a suíte é independente do CI obrigatório; um caso
-   que re-pergunta slot preenchido falha; um caso fora da Base que responde
-   com preço inventado falha.
+1. Executar `python3 -m pytest tests/golden -m golden -s` (o `-s` mostra o
+   relatório impresso pelo teste `test_golden_relatorio`).
+   **Expected**: 49 casos em `tests/golden/casos/*.json` (dimensões:
+   `fluxo`, `abstencao`, `preco`, `orcamento`, `reengajamento`, `handoff`),
+   relatório por dimensão (taxa de acerto = casos corretos / total); a
+   suíte é independente do CI obrigatório; um caso que re-pergunta slot
+   preenchido falha (`test_golden_caso[...]` fica vermelho); um caso fora
+   da Base que responde com preço inventado falha (regex
+   `R\$\s*[\d.,]+` contra `esperado.sem_preco_inventado=true`).
+2. Executar `python3 -m pytest tests/ -q` (gate padrão, sem `-m`
+   explícito).
+   **Expected**: a suíte golden é automaticamente EXCLUÍDA (via
+   `addopts = '-m "not golden"'` em `pyproject.toml`) — apenas a suíte
+   principal roda (385 testes nesta rodada).
 
 **Nota (CHK011 / research.md Decision 9)**: nesta Onda 1 o relatório do
 golden set é **informativo** — não há patamar mínimo de taxa de acerto que
-bloqueie merge/CI. Um threshold por dimensão pode ser adicionado depois,
-como mudança isolada, quando houver histórico de execuções suficiente para
-calibrá-lo.
+bloqueie merge/CI. `test_golden_relatorio` sempre passa (imprime a tabela
+por dimensão e não falha o build); os testes parametrizados
+`test_golden_caso[...]` (um por caso) PODEM falhar individualmente — isso é
+aceitável e desejável para visibilidade, mas nunca bloqueia o gate padrão
+porque a suíte inteira é excluída por marker. Um threshold por dimensão
+pode ser adicionado depois, como mudança isolada, quando houver histórico
+de execuções suficiente para calibrá-lo.
+
+**Estrutura do harness** (`tests/golden/test_golden_runner.py`): usa o
+FlowEngine REAL (`_GoldenStubEngine(FlowEngine)`, mesmo padrão de
+`StubFlowEngine` em `tests/test_flow.py` — stuba apenas `_load_apresentacao`/
+`_load_curso_link`/`_load_knowledge*`/`_load_faq`); o campo `responder` de
+cada caso simula a decisão do `GroundedResponder` (texto + `handoff`
+bool) para isolar a validação da MÁQUINA DE ESTADOS (roteamento,
+não-repetição de slot, orçamento de turnos, reengajamento, allowlist de
+handoff) da geração do LLM em si (coberta por `tests/test_responder.py`).
 
 ## Verificação global
 
-- `python3 -m pytest -q` → suíte inteira verde (~320 + novos testes).
-- `ruff check app/ tests/` → limpo.
+- `python3 -m pytest tests/ -q` → suíte principal verde (385 testes;
+  suíte golden excluída automaticamente pelo `addopts`).
+- `python3 -m pytest tests/golden -m golden -s` → suíte golden (49 casos +
+  1 relatório agregado), informativa.
+- `ruff check app/ tests/` → limpo (inclui `tests/golden/`).
 - Validação real (WhatsApp `#reset`, número autorizado): nudge→handoff em
   PT; retomada por inatividade; não-perda de turno em restart; repetir 1
   caminho em EN ou ES.

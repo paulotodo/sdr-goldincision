@@ -199,10 +199,10 @@ Ref: `plan.md` Envs novos; FR-015, FR-009 (timeout)
 
 Ref: `plan.md` Estratégia de testes; Spec US1 Independent Test; SC-003
 
-- [ ] 6.1.1 Adicionar casos `@pytest.mark.golden` em `tests/golden/` cobrindo resposta verificada antes do envio (US1)
-- [ ] 6.1.2 Adicionar casos de abstenção/handoff quando a afirmação não é sustentada pela base oficial
-- [ ] 6.1.3 Adicionar casos de "preço fora da base" (pergunta sobre valor não coberto pelo conteúdo oficial)
-- [ ] 6.1.4 Confirmar que o golden set roda fora do CI padrão (marcador dedicado, não bloqueia o pipeline padrão)
+- [x] 6.1.1 Adicionar casos `@pytest.mark.golden` em `tests/golden/` cobrindo resposta verificada antes do envio (US1)
+- [x] 6.1.2 Adicionar casos de abstenção/handoff quando a afirmação não é sustentada pela base oficial
+- [x] 6.1.3 Adicionar casos de "preço fora da base" (pergunta sobre valor não coberto pelo conteúdo oficial)
+- [x] 6.1.4 Confirmar que o golden set roda fora do CI padrão (marcador dedicado, não bloqueia o pipeline padrão)
 
 ---
 

@@ -1,0 +1,111 @@
+{
+  "casos": [
+    {
+      "id": "fidelidade_c1_preco_reprovado_pt",
+      "dimensao": "fidelidade",
+      "mensagem": "qual o preço com o desconto especial que vi no Instagram?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "Não tenho essa informação confirmada no momento. Vou encaminhar você para nossa equipe para confirmar os detalhes exatos.",
+        "handoff": true
+      },
+      "knowledge": "O curso HG360 custa R$ 5.000,00 à vista, sem menção a desconto de Instagram.",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true,
+        "sem_preco_inventado": true,
+        "contains": ["Não tenho essa informação confirmada"]
+      }
+    },
+    {
+      "id": "fidelidade_c1_preco_reprovado_en",
+      "dimensao": "fidelidade",
+      "mensagem": "what's the price with the special Instagram discount?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true, "idioma": "en"},
+      "intent": {"intencao": "ambigua", "idioma": "en"},
+      "responder": {
+        "texto": "I don't have that information confirmed right now. I'll connect you with our team so they can help with the exact details.",
+        "handoff": true
+      },
+      "knowledge": "The HG360 course costs $5,000, no mention of an Instagram discount.",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true,
+        "sem_preco_inventado": true,
+        "contains": ["I don't have that information confirmed"]
+      }
+    },
+    {
+      "id": "fidelidade_c1_preco_reprovado_es",
+      "dimensao": "fidelidade",
+      "mensagem": "¿cuál es el precio con el descuento especial de Instagram?",
+      "estado_inicial": {"caminho": 1, "etapa": "duvidas", "eh_medico": true, "idioma": "es"},
+      "intent": {"intencao": "ambigua", "idioma": "es"},
+      "responder": {
+        "texto": "No tengo esa información confirmada en este momento. Voy a conectarte con nuestro equipo para que te ayude con los detalles exactos.",
+        "handoff": true
+      },
+      "knowledge": "El curso HG360 cuesta $5,000, sin mención de descuento de Instagram.",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true,
+        "sem_preco_inventado": true,
+        "contains": ["No tengo esa información confirmada"]
+      }
+    },
+    {
+      "id": "fidelidade_c2_condicao_comercial_data_reprovada_pt",
+      "dimensao": "fidelidade",
+      "mensagem": "vocês têm turma extra em dezembro com vaga garantida?",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "duvidas", "eh_medico": true,
+        "experiencia_corporal": true, "produto_interesse": "hg360-sp"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "Não tenho essa informação confirmada no momento. Vou encaminhar você para nossa equipe para confirmar os detalhes exatos.",
+        "handoff": true
+      },
+      "knowledge": "HG360 São Paulo (28-30/08/2026) — sem turma de dezembro cadastrada.",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true,
+        "not_contains": ["dezembro"]
+      }
+    },
+    {
+      "id": "fidelidade_c3_licenciamento_elegibilidade_reprovada_pt",
+      "dimensao": "fidelidade",
+      "mensagem": "posso fazer o licenciamento mesmo sem CRM, só com o diploma?",
+      "estado_inicial": {"caminho": 3, "etapa": "sistema_licenciamento_duvidas", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "responder": {
+        "texto": "Não tenho essa informação confirmada no momento. Vou encaminhar você para nossa equipe para confirmar os detalhes exatos.",
+        "handoff": true
+      },
+      "knowledge": "Licenciamento Internacional GoldIncision: exclusivo para médicos com CRM ativo.",
+      "esperado": {
+        "proxima_acao": "handoff",
+        "abster": true
+      }
+    },
+    {
+      "id": "fidelidade_c1_preco_aprovado_dentro_da_base_pt",
+      "dimensao": "fidelidade",
+      "mensagem": "qual o valor do curso online?",
+      "estado_inicial": {"caminho": 1},
+      "intent": {"intencao": "curso_online", "idioma": "pt"},
+      "responder": {
+        "texto": "O investimento do Curso Online é de R$ 4.997,00 à vista ou em até 12x.",
+        "handoff": false
+      },
+      "knowledge": "BASE: Curso Online R$ 4.997,00 à vista ou em até 12x.",
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "contains": ["R$ 4.997,00"]
+      }
+    }
+  ]
+}

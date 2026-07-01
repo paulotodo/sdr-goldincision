@@ -210,24 +210,28 @@ enquanto respostas ambíguas continuam gerando uma reformulação da pergunta
 **Portão de verificação de fidelidade (Pilar 5)**
 
 - **FR-008**: Antes de enviar qualquer resposta gerada pelo modelo que
-  toque preço, data, elegibilidade ou condição comercial, o sistema MUST
-  executar uma verificação separada que confirma se toda afirmação factual
-  da resposta está sustentada pelo conteúdo oficial fornecido como
-  contexto.
+  toque uma "condição comercial" — definida (ver Clarificação Q2) como
+  qualquer afirmação sobre preço/valor, parcelamento, desconto/promoção,
+  data/prazo, disponibilidade de turma/vaga ou critério de elegibilidade
+  médica —, o sistema MUST executar uma verificação separada que confirma se
+  toda afirmação factual da resposta está sustentada pelo conteúdo oficial
+  fornecido como contexto. Saudações e perguntas de rapport NÃO acionam o
+  portão.
 - **FR-009**: Quando a verificação concluir que a resposta NÃO é
   sustentada pelo contexto (ou não conseguir concluir por
-  indisponibilidade), o sistema MUST impedir o envio dessa resposta e, em
+  indisponibilidade, incluindo estouro do timeout de ~`3s` — ver
+  Clarificação Q3), o sistema MUST impedir o envio dessa resposta e, em
   vez dela, usar o bloco/mensagem canônica de "informação indisponível"
   ou encaminhar a um especialista humano.
 - **FR-010**: A verificação de fidelidade MUST listar quais afirmações da
   resposta não puderam ser sustentadas, para fins de observabilidade e
   ajuste futuro (não é obrigatório expor essa lista ao lead).
-- **FR-011**: Respostas de dúvida que NÃO tocam preço/data/elegibilidade/
-  condição comercial (ex.: uma dúvida puramente de conteúdo/formato do
-  curso, já sustentada estruturalmente pelo contrato do FR-001) MUST
-  continuar seguindo o fluxo já existente de auditoria via fontes citadas,
-  sem necessariamente re-executar a verificação de fidelidade dedicada
-  — ver Clarificação 2 sobre o escopo exato de "condição comercial".
+- **FR-011**: Respostas de dúvida que NÃO tocam nenhuma "condição comercial"
+  (conforme escopo fixado na Clarificação Q2 — ex.: uma dúvida puramente de
+  conteúdo/formato do curso, ou saudação/rapport, já sustentada
+  estruturalmente pelo contrato do FR-001) MUST continuar seguindo o fluxo já
+  existente de auditoria via fontes citadas, sem necessariamente re-executar
+  a verificação de fidelidade dedicada.
 - **FR-012**: A verificação de fidelidade NÃO se aplica às apresentações e
   demais textos verbatim (mesma exceção do FR-007).
 
@@ -244,10 +248,11 @@ enquanto respostas ambíguas continuam gerando uma reformulação da pergunta
   confiança), a partir da mensagem do lead e do contexto já conhecido da
   conversa (perfil e histórico).
 - **FR-015**: O sistema MUST comparar o grau de confiança do entendimento
-  assistido a um limiar configurável antes de aceitar o valor extraído;
-  abaixo do limiar, ou quando a extração for inválida, o sistema MUST
-  tratar a resposta como "não entendida" e reformular a pergunta ao lead —
-  nunca preencher a informação de qualificação com um valor adivinhado.
+  assistido a um limiar configurável (global único, valor inicial `0.6` —
+  ver Clarificação Q1) antes de aceitar o valor extraído; abaixo do limiar,
+  ou quando a extração for inválida, o sistema MUST tratar a resposta como
+  "não entendida" e reformular a pergunta ao lead — nunca preencher a
+  informação de qualificação com um valor adivinhado.
 - **FR-016**: O entendimento assistido MUST usar o que já é conhecido do
   lead (perfil já capturado, histórico da conversa) para desambiguar a
   resposta, evitando reperguntar informação já respondida.
@@ -353,15 +358,38 @@ enquanto respostas ambíguas continuam gerando uma reformulação da pergunta
 
 ### Sessão 2026-07-01
 
-- **Q**: [NEEDS CLARIFICATION: qual o limiar de confiança do entendimento
-  assistido (slot-filling) — um valor único global ou por etapa, e qual o
-  valor inicial] → a ser resolvido na fase `clarify`.
-- **Q**: [NEEDS CLARIFICATION: escopo exato de "condição comercial" para
-  fins do portão de verificação de fidelidade — quais tipos de afirmação
-  contam além de preço/data/elegibilidade explícitos] → a ser resolvido na
-  fase `clarify`.
-- **Q**: [NEEDS CLARIFICATION: quantas tentativas de correção o pacote
-  estruturado malformado deve ter antes do encaminhamento humano, e qual a
-  latência adicional aceitável introduzida pela verificação de fidelidade e
-  pelo entendimento assistido antes de considerar necessário um caminho de
-  contingência] → a ser resolvido na fase `clarify`.
+Resolvida via mediação `feature-00c-clarify-asker` → `feature-00c-clarify-answerer`
+(decisões auditáveis dec-009, dec-010, dec-011 em `state.json`).
+
+- **Q1 (limiar de confiança do slot-filling)**: um valor único global ou por
+  etapa, e qual o valor inicial?
+  - **A (score 2, dec-009)**: **Limiar único global = `0.6`** (escala 0–1),
+    aplicado às 5 etapas do FR-017. NÃO é configurável por etapa nesta onda.
+    Fundamentação: FR-015 usa "um limiar configurável" (singular) → estrutura
+    global única; FR-018 cita "limiares" no plural apenas para ajuste
+    futuro/observabilidade. Valor `0.6` comissionado explicitamente pelo
+    operador (preferido ao `0.75` inicialmente cogitado), sem violar a
+    constitution. Deve ser exposto como env configurável (ex.
+    `SLOT_CONFIDENCE_THRESHOLD=0.6`).
+- **Q2 (escopo de "condição comercial" para o portão de fidelidade,
+  FR-008/FR-011)**: quais afirmações contam além de preço/data/elegibilidade
+  explícitos?
+  - **A (score 3, dec-010)**: **"Condição comercial" = qualquer afirmação
+    sobre** preço/valor, parcelamento, desconto/promoção, data/prazo,
+    disponibilidade de turma/vaga, e critério de **elegibilidade médica**.
+    Saudações e perguntas de rapport **NÃO** passam pelo portão. Fundamentação
+    empírica: constitution Princípio V (v1.0.0) — "Objeções comerciais são
+    tratadas exclusivamente pelo Banco Oficial de Objeções; Critérios de
+    elegibilidade são respeitados sem flexibilização" (comercial + elegibilidade
+    sob o mesmo princípio); FR-008 lista preço/data/elegibilidade/condição
+    comercial como gatilhos conjuntos; briefing trata turmas/datas como dado
+    dinâmico factual sujeito a variação.
+- **Q3 (tentativas de correção + latência aceitável antes da contingência)**:
+  - **A (score 2, dec-011)**: **Retry de pacote malformado permanece 1** (já
+    fixado no FR-003, não reaberto). **Timeout duro = ~`3s` por chamada** de
+    verificação de fidelidade e de entendimento assistido (slot-filling); ao
+    exceder, o sistema trata como indisponibilidade e segue o caminho de
+    contingência já descrito nos Edge Cases (bloco canônico de "informação
+    indisponível" / reformulação / handoff). **Alvo de latência interno ~`2s`**
+    (gpt-4o-mini), aceitável somar ao turno já pacing-limitado. Timeout deve
+    ser exposto como env configurável (ex. `VERIFY_TIMEOUT_SECONDS=3`).

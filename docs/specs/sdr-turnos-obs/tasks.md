@@ -300,14 +300,14 @@ Ref: Spec FR-018; research.md Decision 7; tarefa 1.2 (limiar de aceitação)
 
 Ref: Spec FR-019, FR-020, SC-009
 
-- [ ] 8.1.1 Rodar a suíte completa existente (~320 testes) e confirmar
+- [x] 8.1.1 Rodar a suíte completa existente (~320 testes) e confirmar
   zero regressão em anti-loop (`_MAX_TENTATIVAS=3`), teto de mensagens
   (`max_msgs_per_turn=4`), Pacer/retry 429, idempotência (`SET NX EX`),
   lock por ticket (exceto TTL elevado por design), gate de fila (IA=77)
   e debounce (8s)
-- [ ] 8.1.2 Escrever/atualizar teste explícito de não-regressão para
+- [x] 8.1.2 Escrever/atualizar teste explícito de não-regressão para
   cada mecanismo preservado listado em FR-019
-- [ ] 8.1.3 Confirmar as invariantes de FR-020 permanecem intactas:
+- [x] 8.1.3 Confirmar as invariantes de FR-020 permanecem intactas:
   verbatim nunca gerado pelo LLM, destino de handoff sempre da
   allowlist, elegibilidade médica inflexível, uma pergunta por mensagem,
   resposta no idioma do lead (PT/EN/ES)
@@ -316,12 +316,12 @@ Ref: Spec FR-019, FR-020, SC-009
 
 Ref: Constitution v1.0.0; CLAUDE.md; plan.md §Próximos Passos
 
-- [ ] 8.2.1 Rodar `ruff check app/ tests/` e corrigir todos os achados
-- [ ] 8.2.2 Rodar a suíte completa (excluindo `tests/golden`) e confirmar
+- [x] 8.2.1 Rodar `ruff check app/ tests/` e corrigir todos os achados
+- [x] 8.2.2 Rodar a suíte completa (excluindo `tests/golden`) e confirmar
   100% verde
 - [ ] 8.2.3 Abrir PR contra `master` (protegido, CI obrigatório); sem
   deploy automático — deploy fica a cargo do operador
-- [ ] 8.2.4 Atualizar `quickstart.md` com eventuais ajustes descobertos
+- [x] 8.2.4 Atualizar `quickstart.md` com eventuais ajustes descobertos
   durante a implementação dos 10 cenários
 
 ---

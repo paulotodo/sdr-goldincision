@@ -94,6 +94,13 @@ class SessionContext:
     # Transiente: nunca persistido, apenas plumbing do turno atual (mesmo
     # padrao de turnos_sessao/turnos_no_no).
     horas_inatividade: Optional[float] = None
+    # Overflow de turno (anti-rajada): blocos de conteudo verbatim ainda NAO
+    # entregues quando a resposta excedeu max_msgs_per_turn. Bufferizados em Redis
+    # (hash estado:{chamadoId}) pelo CALLER (webhook.py) e hidratados aqui ANTES de
+    # FlowEngine.process, para que o motor RETOME ("pode continuar") em vez de
+    # descartar o restante e cair em abstencao/handoff. Transiente/fail-open.
+    overflow_blocos: list[str] = field(default_factory=list)
+    overflow_idioma: Optional[str] = None
 
 
 class MemoryManager:

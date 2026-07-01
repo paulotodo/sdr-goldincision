@@ -237,6 +237,29 @@ _T: dict[str, dict[str, str]] = {
         "en": "Feel free to ask any questions about the training. 😊",
         "es": "Quedo a tu disposición para cualquier duda sobre la formación. 😊",
     },
+    # Confirmacao curta quando, no convite de overflow, o lead pede especialista.
+    "overflow_especialista": {
+        "pt": (
+            "Perfeito! Vou te conectar com um de nossos especialistas, que "
+            "apresenta tudo em detalhe e tira suas dúvidas pessoalmente. 🙏"
+        ),
+        "en": (
+            "Perfect! I'll connect you with one of our specialists, who will walk "
+            "you through everything and answer your questions personally. 🙏"
+        ),
+        "es": (
+            "¡Perfecto! Voy a conectarte con uno de nuestros especialistas, que te "
+            "lo presenta todo en detalle y resuelve tus dudas personalmente. 🙏"
+        ),
+    },
+    # Reconhecimento curto para "glue" conversacional (saudacao/agradecimento/
+    # afirmacao pura) num no de DUVIDAS — evita mandar isso ao RAG e cair em
+    # abstencao/handoff ("engessado"). Nao passa pelo LLM (anti-alucinacao).
+    "glue_ack": {
+        "pt": "Claro! 😊 Fique à vontade para tirar qualquer dúvida sobre o treinamento.",
+        "en": "Of course! 😊 Feel free to ask any questions about the training.",
+        "es": "¡Claro! 😊 Quedo a tu disposición para cualquier duda sobre la formación.",
+    },
     "fechar_link": {
         "pt": "Gostaria de receber o link para realizar sua inscrição?",
         "en": "Would you like to receive the link to complete your registration?",
@@ -1019,9 +1042,19 @@ class FlowEngine:
             self._responder.last_fonte_ids = None
 
         estado_inatividade = self._aplicar_reengajamento_pre(context)
-        result = await self._process_core(ticket_id, user_message, context)
-        result = self._aplicar_reengajamento_pos(context, result, estado_inatividade)
-        result = self._aplicar_orcamento_turnos(context, result)
+        # Retomada de overflow (anti-rajada) ANTES do roteamento normal: se ha
+        # blocos bufferizados e o lead respondeu ao convite "continuar ou
+        # especialista?", tratamos aqui (continuar = devolve o restante verbatim;
+        # especialista = handoff). Pulado quando a sessao expirou (buffer stale).
+        overflow_result: Optional[FlowResult] = None
+        if estado_inatividade != "sessao_nova":
+            overflow_result = await self._aplicar_overflow_resume(context, user_message)
+        if overflow_result is not None:
+            result = overflow_result
+        else:
+            result = await self._process_core(ticket_id, user_message, context)
+            result = self._aplicar_reengajamento_pos(context, result, estado_inatividade)
+            result = self._aplicar_orcamento_turnos(context, result)
 
         # Anexar observabilidade aditiva ao FlowResult final (pos-hoc — task
         # 4.3): nunca altera decisao de fluxo, apenas repassa o que os
@@ -1036,6 +1069,86 @@ class FlowEngine:
             )
             result.fonte_ids = self._responder.last_fonte_ids
         return result
+
+    # ------------------------------------------------------------------
+    # Retomada de overflow de turno (anti-rajada) — "continuar ou especialista?"
+    # ------------------------------------------------------------------
+
+    async def _aplicar_overflow_resume(
+        self, context: SessionContext, user_message: str
+    ) -> Optional[FlowResult]:
+        """
+        Retoma o overflow de turno: se ha blocos bufferizados (o lead recebeu o
+        convite "continuar explicando o restante ou especialista?"), interpreta a
+        resposta:
+          - continuacao afirmativa -> devolve o RESTANTE (verbatim, sem LLM/RAG),
+            nunca cai em abstencao/handoff (era a causa do "engessado");
+          - pedido de especialista -> handoff ao destino LOGICO do caminho atual
+            (allowlist/config, SEC-LLM-3; nunca do LLM);
+          - "outro" (mensagem/pergunta nova real) -> limpa o buffer e retorna None
+            (o processamento normal segue).
+        Fast-path deterministico primeiro (ZERO LLM); fallback agentico via
+        SlotExtractor so quando o fast-path nao resolve.
+        """
+        blocos = context.overflow_blocos or []
+        if not blocos:
+            return None
+        idioma = context.overflow_idioma or context.idioma or "pt"
+
+        intent = _classificar_overflow_fastpath(user_message)
+        if intent is None and self._slot_extractor is not None:
+            intent = await self._classificar_overflow_llm(context, user_message)
+
+        if intent == "continuar":
+            # Consome o buffer local; o webhook re-bufferiza o remainder do envio
+            # (se ainda exceder o teto por turno, o proximo turno retoma de novo).
+            context.overflow_blocos = []
+            texto = "\n\n".join(b for b in blocos if b)
+            return FlowResult(texto, "continue", context.caminho, context.etapa, {})
+
+        if intent == "especialista":
+            context.overflow_blocos = []
+            destino = _destino_logico_por_caminho(context.caminho)
+            texto = _t("overflow_especialista", idioma)
+            return FlowResult(
+                texto, "handoff", context.caminho, context.etapa, {},
+                handoff_destino=destino, handoff_motivo="pedido_humano",
+            )
+
+        # "outro" / indeterminado: abandona o overflow e processa normalmente
+        # (uma pergunta nova genuina ainda precisa funcionar).
+        context.overflow_blocos = []
+        return None
+
+    async def _classificar_overflow_llm(
+        self, context: SessionContext, user_message: str
+    ) -> Optional[str]:
+        """
+        Fallback agentico (gpt-4o-mini) para classificar a resposta ao convite de
+        overflow em {continuar|especialista|outro} quando o fast-path nao resolve.
+        Baixa confianca (< limiar) -> None (tratado como "outro"). Fail-safe: o
+        proprio SlotExtractor nunca propaga excecao.
+        """
+        slot_schema = {
+            "nome": "resposta_overflow",
+            "descricao": (
+                "O agente ofereceu CONTINUAR explicando o restante do conteudo OU "
+                "conectar com um especialista. Classifique a intencao do lead."
+            ),
+            "valores_esperados": ["continuar", "especialista", "outro"],
+        }
+        slot = await self._slot_extractor.extract(
+            slot_schema, user_message, _perfil_conhecido(context),
+        )
+        self._last_confianca_slot = slot.confianca  # observabilidade aditiva
+        if not SlotExtractor.aceitar(slot, settings.slot_confidence_threshold):
+            return None
+        valor = _norm(slot.valor or "")
+        if valor in {"continuar", "continue", "seguir", "sim"}:
+            return "continuar"
+        if valor in {"especialista", "humano", "consultor", "atendente"}:
+            return "especialista"
+        return None
 
     # ------------------------------------------------------------------
     # Timeout de inatividade e reengajamento (US2, FASE 5 — FR-008 a FR-010)
@@ -1655,6 +1768,13 @@ class FlowEngine:
             # e no Banco de Objecoes do Licenciamento (nao encaminhar prematuramente).
             # RAG hibrido (FASE 5, research.md Decision 7): abster=True curto-
             # circuita ANTES do LLM de redacao (nunca gera texto sem fonte).
+            _glue = _resposta_glue_pura(context, user_message)
+            if _glue is not None:
+                updates["etapa_mapa_mestre"] = ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS
+                return FlowResult(
+                    _glue, "continue", CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+                    ETAPA_SISTEMA_LICENCIAMENTO_DUVIDAS, updates,
+                )
             knowledge, resultado_rag = await self._load_knowledge_by_slug(
                 _SLUG_LICENCIAMENTO, idioma, user_message
             )
@@ -1846,6 +1966,13 @@ class FlowEngine:
         self, context: SessionContext, user_message: str, updates: dict
     ) -> FlowResult:
         idioma = context.idioma
+        _glue = _resposta_glue_pura(context, user_message)
+        if _glue is not None:
+            updates["etapa_mapa_mestre"] = ETAPA_DUVIDAS
+            return FlowResult(
+                _glue, "continue", CaminhoMapaMestre.CURSO_ONLINE_HG,
+                ETAPA_DUVIDAS, updates,
+            )
         knowledge, resultado_rag = await self._load_knowledge_by_slug(
             "curso-online-hg", idioma, user_message
         )
@@ -2066,6 +2193,10 @@ class FlowEngine:
     ) -> FlowResult:
         idioma = context.idioma
         cam = CaminhoMapaMestre.CURSOS_PRESENCIAIS
+        _glue = _resposta_glue_pura(context, user_message)
+        if _glue is not None:
+            updates["etapa_mapa_mestre"] = ETAPA_DUVIDAS
+            return FlowResult(_glue, "continue", cam, ETAPA_DUVIDAS, updates)
         knowledge, resultado_rag = await self._load_knowledge_by_slug(
             slug, idioma, user_message
         )
@@ -2557,6 +2688,118 @@ def _pede_humano(texto: str) -> bool:
         "hablar con una persona", "hablar con un humano", "atencion humana",
     ]
     return any(c in t for c in cues)
+
+
+# ---------------------------------------------------------------------------
+# Overflow de turno — classificacao fast-path da resposta ao convite
+# "continuar explicando ou especialista?" (anti-rajada). Deterministico primeiro
+# (ZERO LLM); o fallback agentico fica em FlowEngine._aplicar_overflow_resume.
+# ---------------------------------------------------------------------------
+# Continuacao afirmativa (PT/EN/ES) — "quero o resto da explicacao".
+_OVERFLOW_CONTINUAR = {
+    "sim", "s", "si", "pode", "pode continuar", "continua", "continuar", "continue",
+    "continúa", "sigue", "prossiga", "segue", "seguir", "manda", "manda ver", "quero",
+    "quero sim", "quero saber", "vai", "bora", "isso", "claro", "ok", "okay", "yes",
+    "yeah", "yep", "yup", "por favor", "porfavor", "pfv", "explica", "explique",
+    "explicar", "detalha", "detalhar", "mais", "keep going", "go on", "go ahead",
+    "tell me more", "more", "dale", "adelante", "continua por favor", "pode sim",
+    "pode falar", "pode explicar", "manda o resto", "quero o resto", "continua ai",
+}
+# Preferencia por especialista / atendimento humano.
+_OVERFLOW_ESPECIALISTA = {
+    "especialista", "consultor", "atendente", "humano", "pessoa", "alguem",
+    "specialist", "human", "agent", "someone", "person", "especialista por favor",
+    "prefiro especialista", "quero especialista", "falar com especialista",
+    "falar com alguem", "falar com atendente", "quero falar com", "me conecta",
+    "conectar", "presencial", "reuniao", "reunion", "meeting", "call", "ligacao",
+}
+# Substrings que indicam pedido de especialista/humano (frases mais longas).
+_OVERFLOW_ESPECIALISTA_SUBSTR = (
+    "especialista", "consultor", "atendente", "com um humano", "com uma pessoa",
+    "falar com alguem", "prefiro pessoa", "specialist", "with a human",
+    "with someone", "talk to a person", "hablar con", "un especialista",
+    "presencial", "pessoalmente", "in person",
+)
+
+
+# ---------------------------------------------------------------------------
+# "Glue" conversacional — saudacao/agradecimento/afirmacao pura. Num no de
+# DUVIDAS, isto NAO deve ir ao RAG (que abstem -> handoff, deixando o agente
+# "engessado"). Anti-alucinacao intacta: DUVIDA FACTUAL real (com "?" ou tokens
+# substantivos) continua indo ao RAG e abstendo quando sem base.
+# ---------------------------------------------------------------------------
+_GLUE_TOKENS = {
+    # afirmacoes / reconhecimentos
+    "sim", "s", "si", "ok", "okay", "okey", "claro", "certo", "beleza", "blz",
+    "perfeito", "otimo", "otima", "legal", "show", "isso", "ta", "tah", "entendi",
+    "entendido", "bacana", "massa", "top", "joia", "tranquilo", "bom", "bem",
+    "combinado", "maravilha", "excelente", "positivo", "aham", "uhum", "yes",
+    "yeah", "yep", "sure", "nice", "great", "vale", "dale", "genial",
+    # saudacoes
+    "oi", "ola", "opa", "eai", "ai", "hey", "hi", "hello", "hola", "buenas",
+    # agradecimentos
+    "obrigado", "obrigada", "obg", "obgd", "vlw", "valeu", "thanks", "thx",
+    "gracias", "grato", "grata",
+}
+_GLUE_PHRASES = {
+    "bom dia", "boa tarde", "boa noite", "tudo bem", "tudo bom", "tudo certo",
+    "muito obrigado", "muito obrigada", "obrigado mesmo", "obrigada mesmo",
+    "thank you", "ta bom", "ta bem", "esta bem", "ok obrigado", "ok obrigada",
+    "pode ser", "ta otimo", "que bom", "muy bien", "esta bien", "de acuerdo",
+    "tudo otimo", "show de bola",
+}
+
+
+def _glue_pura(user_message: str) -> bool:
+    """
+    True se a mensagem e glue conversacional PURA (saudacao/agradecimento/
+    afirmacao curta), SEM conteudo de pergunta. Conservador: rejeita se houver
+    "?" ou > 4 tokens, e exige que TODOS os tokens sejam glue (nao captura
+    "quanto custa", "onde e" etc. — duvidas factuais seguem para o RAG).
+    """
+    if "?" in (user_message or ""):
+        return False
+    t = _norm(user_message)
+    if not t:
+        return False
+    if t in _GLUE_PHRASES:
+        return True
+    toks = t.split()
+    if len(toks) > 4:
+        return False
+    return all(tok in _GLUE_TOKENS for tok in toks)
+
+
+def _resposta_glue_pura(context: SessionContext, user_message: str) -> Optional[str]:
+    """Texto de reconhecimento (deterministico, no idioma) se a mensagem for glue
+    pura; senao None (segue para o RAG/roteamento normal)."""
+    if not _glue_pura(user_message):
+        return None
+    return _t("glue_ack", context.idioma)
+
+
+def _classificar_overflow_fastpath(texto: str) -> Optional[str]:
+    """
+    Classifica DETERMINISTICAMENTE a resposta ao convite de overflow.
+
+    Retorna "continuar" | "especialista" | None (fast-path nao resolveu —
+    cabe ao fallback agentico ou a tratar como mensagem nova). Especialista tem
+    precedencia sobre continuar quando ambos aparecem (o lead pediu humano).
+    """
+    t = _norm(texto)
+    if not t:
+        return None
+    if any(s in t for s in _OVERFLOW_ESPECIALISTA_SUBSTR):
+        return "especialista"
+    toks = set(t.split())
+    if t in _OVERFLOW_ESPECIALISTA or (toks & _OVERFLOW_ESPECIALISTA):
+        return "especialista"
+    if t in _OVERFLOW_CONTINUAR:
+        return "continuar"
+    # afirmativos curtos de 1-3 palavras (ex.: "pode continuar sim", "sim claro")
+    if len(toks) <= 3 and (toks & _OVERFLOW_CONTINUAR):
+        return "continuar"
+    return None
 
 
 def _norm(texto: str) -> str:

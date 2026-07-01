@@ -1,0 +1,56 @@
+{
+  "casos": [
+    {
+      "id": "overflow_c1_pode_continuar_retoma_pt",
+      "dimensao": "overflow_resume",
+      "mensagem": "pode continuar",
+      "estado_inicial": {
+        "caminho": 1,
+        "etapa": "duvidas",
+        "eh_medico": true,
+        "overflow_blocos": [
+          "Parte 2 do conteudo oficial do treinamento.",
+          "Parte 3 do conteudo oficial do treinamento."
+        ],
+        "overflow_idioma": "pt"
+      },
+      "intent": {
+        "intencao": "ambigua",
+        "idioma": "pt"
+      },
+      "esperado": {
+        "proxima_acao": "continue",
+        "contains": [
+          "Parte 2 do conteudo oficial do treinamento.",
+          "Parte 3 do conteudo oficial do treinamento."
+        ],
+        "not_contains": [
+          "Não tenho essa informação",
+          "encaminhar você para nossa equipe"
+        ]
+      }
+    },
+    {
+      "id": "overflow_c2_glue_agradecimento_nao_absteem_pt",
+      "dimensao": "overflow_resume",
+      "mensagem": "muito obrigado!",
+      "estado_inicial": {
+        "caminho": 1,
+        "etapa": "duvidas",
+        "eh_medico": true
+      },
+      "intent": {
+        "intencao": "curso_online",
+        "idioma": "pt"
+      },
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "duvidas",
+        "not_contains": [
+          "Não tenho essa informação",
+          "encaminhar você para nossa equipe"
+        ]
+      }
+    }
+  ]
+}

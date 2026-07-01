@@ -37,6 +37,13 @@ TURNOS_NO_NO_ETAPA_FIELD = "turnos_no_no_etapa"  # marca qual etapa o contador a
 # vive no hash `estado:{chamadoId}`, ao lado dos campos acima.
 ULTIMA_INTERACAO_FIELD = "ultima_interacao"      # epoch seconds (int) da ultima interacao
 
+# Overflow de turno (anti-rajada): quando a resposta excede max_msgs_per_turn, os
+# blocos NAO entregues sao bufferizados aqui (JSON list) + idioma, para o proximo
+# turno RETOMAR ("pode continuar") em vez de descartar o restante e cair em
+# abstencao/handoff. Efemeros; fail-open.
+OVERFLOW_BLOCOS_FIELD = "overflow_blocos"        # JSON list[str] dos blocos ainda nao enviados
+OVERFLOW_IDIOMA_FIELD = "overflow_idioma"        # idioma do convite/overflow (pt|en|es)
+
 
 def idemp_key(chamado_id: int, payload_hash: str) -> str:
     """

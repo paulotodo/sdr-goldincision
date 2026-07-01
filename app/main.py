@@ -132,6 +132,31 @@ async def lifespan(app: FastAPI):
         logger.exception("sdr-whatsapp: falha ao inicializar pool Redis")
         _redis_client = None
 
+    # Recovery de debounce pendente (US3, FASE 4, task 4.1.1): apos conectar
+    # o Redis, escaneia `debounce:*` e reagenda/flusha rajadas interrompidas
+    # por um restart/deploy anterior — evita perder turno orfao (FR-011/012).
+    if _redis_client is not None:
+        try:
+            from app.api.webhook import _process_consolidated_messages
+            from app.core.debounce import DebounceManager
+
+            _recovery_mgr = DebounceManager(
+                _redis_client, debounce_seconds=settings.debounce_seconds
+            )
+            _n_recovered = await _recovery_mgr.recover_pending(
+                _process_consolidated_messages
+            )
+            if _n_recovered:
+                logger.info(
+                    "sdr-whatsapp: debounce recovery — %d rajada(s) pendente(s) "
+                    "reagendada(s)/flushed",
+                    _n_recovered,
+                )
+            else:
+                logger.info("sdr-whatsapp: debounce recovery — nenhuma rajada pendente")
+        except Exception:
+            logger.exception("sdr-whatsapp: falha no recovery de debounce — continuando")
+
     logger.info("sdr-whatsapp: pronto para receber requisicoes")
     yield
 

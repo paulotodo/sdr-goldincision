@@ -170,21 +170,21 @@ Ref: Spec FR-004, FR-006, FR-020; Edge Cases item 1 (colisão sessão+nó)
 
 Ref: Spec FR-011, FR-012; research.md Decision 6; `main.py`, `debounce.py`
 
-- [ ] 4.1.1 Implementar `SCAN debounce:*` no lifespan de `app/main.py`
+- [x] 4.1.1 Implementar `SCAN debounce:*` no lifespan de `app/main.py`
   após conectar o Redis
-- [ ] 4.1.2 Implementar helper de recovery em `debounce.py`: reagendar
+- [x] 4.1.2 Implementar helper de recovery em `debounce.py`: reagendar
   `_delayed_flush` se a janela de 8s ainda não expirou, flush imediato
   caso contrário (estratégia conservadora)
-- [ ] 4.1.3 Garantir que o flush é atômico (`LRANGE`+`DEL`) e idempotente
+- [x] 4.1.3 Garantir que o flush é atômico (`LRANGE`+`DEL`) e idempotente
   mesmo se o recovery rodar mais de uma vez
-- [ ] 4.1.4 Verificar interação com o gate de fila existente (IA=77):
+- [x] 4.1.4 Verificar interação com o gate de fila existente (IA=77):
   atendimento sob controle humano não gera resposta do bot na rajada
   recuperada (Edge Case item 5)
-- [ ] 4.1.5 Escrever teste: rajada pendente processada automaticamente
+- [x] 4.1.5 Escrever teste: rajada pendente processada automaticamente
   no restart, sem exigir nova mensagem do lead (Acceptance Scenario 1, US3)
-- [ ] 4.1.6 Escrever teste: janela já expirada no momento do restart ⇒
+- [x] 4.1.6 Escrever teste: janela já expirada no momento do restart ⇒
   processamento imediato na inicialização (Acceptance Scenario 2, US3)
-- [ ] 4.1.7 Escrever teste: recovery executado mais de uma vez processa
+- [x] 4.1.7 Escrever teste: recovery executado mais de uma vez processa
   a rajada exatamente uma vez (Acceptance Scenario 3, US3; FR-012)
 
 ---

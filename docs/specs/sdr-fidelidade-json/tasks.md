@@ -101,45 +101,45 @@ Ref: `plan.md` `GroundedResponder.generate()`; FR-008, FR-011, FR-012
 
 Ref: `plan.md` `app/core/interpret.py` (novo); FR-014, FR-016; `data-model.md` §3
 
-- [ ] 3.1.1 Criar `app/core/interpret.py` com `SlotExtractor.extract(slot_schema, user_message, contexto)` via gpt-4o-mini (json_schema)
-- [ ] 3.1.2 Usar `known_facts` + histórico da conversa para desambiguar, evitando reperguntar informação já respondida
-- [ ] 3.1.3 Tratar a mensagem do lead exclusivamente como dado (SEC-LLM-1) — delimitação explícita no prompt
-- [ ] 3.1.4 Escrever testes unitários: extração correta, uso de contexto conhecido, mensagem com tentativa de instrução tratada apenas como dado
+- [x] 3.1.1 Criar `app/core/interpret.py` com `SlotExtractor.extract(slot_schema, user_message, contexto)` via gpt-4o-mini (json_schema)
+- [x] 3.1.2 Usar `known_facts` + histórico da conversa para desambiguar, evitando reperguntar informação já respondida
+- [x] 3.1.3 Tratar a mensagem do lead exclusivamente como dado (SEC-LLM-1) — delimitação explícita no prompt
+- [x] 3.1.4 Escrever testes unitários: extração correta, uso de contexto conhecido, mensagem com tentativa de instrução tratada apenas como dado
 
 ### 3.2 Limiar de confiança e fallback `[A]`
 
 Ref: FR-015; Clarifications Q1/dec-009; `app/config.py` `SLOT_CONFIDENCE_THRESHOLD`
 
-- [ ] 3.2.1 Comparar a confiança extraída ao limiar configurável (`SLOT_CONFIDENCE_THRESHOLD=0.6`)
-- [ ] 3.2.2 Abaixo do limiar ou extração inválida → tratar como "não entendida" e reformular a pergunta (nunca inventar valor)
-- [ ] 3.2.3 Escrever teste: confiança >= limiar aceita o valor; confiança < limiar reformula; nunca preenche o slot com valor adivinhado
+- [x] 3.2.1 Comparar a confiança extraída ao limiar configurável (`SLOT_CONFIDENCE_THRESHOLD=0.6`)
+- [x] 3.2.2 Abaixo do limiar ou extração inválida → tratar como "não entendida" e reformular a pergunta (nunca inventar valor)
+- [x] 3.2.3 Escrever teste: confiança >= limiar aceita o valor; confiança < limiar reformula; nunca preenche o slot com valor adivinhado
 
 ### 3.3 Fast-path determinístico antes do LLM `[A]`
 
 Ref: FR-013, FR-019; `plan.md` fast-path existente (`_detectar_medico_investidor`, `_detectar_fechamento`, `_eh_pergunta`)
 
-- [ ] 3.3.1 Garantir que o reconhecimento determinístico roda PRIMEIRO para cada etapa de qualificação
-- [ ] 3.3.2 Se resolver com alta certeza, o `SlotExtractor` NÃO é acionado (curto-circuito)
-- [ ] 3.3.3 Reconhecimento de opção numérica de menu permanece SEMPRE determinístico, nunca delegado ao entendimento assistido (FR-019)
-- [ ] 3.3.4 Escrever teste garantindo que fast-path resolvido não invoca o client OpenAI (assert not-called)
+- [x] 3.3.1 Garantir que o reconhecimento determinístico roda PRIMEIRO para cada etapa de qualificação
+- [x] 3.3.2 Se resolver com alta certeza, o `SlotExtractor` NÃO é acionado (curto-circuito)
+- [x] 3.3.3 Reconhecimento de opção numérica de menu permanece SEMPRE determinístico, nunca delegado ao entendimento assistido (FR-019)
+- [x] 3.3.4 Escrever teste garantindo que fast-path resolvido não invoca o client OpenAI (assert not-called)
 
 ### 3.4 Cobertura das 5 etapas de qualificação `[A]`
 
 Ref: FR-017; `plan.md` `flow.py` (`qualif_medico`, objetivo, `qualif_experiencia`, `qualif_especialidade`, `escolha_turma`)
 
-- [ ] 3.4.1 Integrar `SlotExtractor` na etapa `qualif_medico` (confirmação de elegibilidade médica)
-- [ ] 3.4.2 Integrar `SlotExtractor` na etapa objetivo (objetivo com o sistema/produto de interesse)
-- [ ] 3.4.3 Integrar `SlotExtractor` na etapa `qualif_experiencia` (experiência corporal prévia)
-- [ ] 3.4.4 Integrar `SlotExtractor` na etapa `qualif_especialidade` (especialidade informada)
-- [ ] 3.4.5 Integrar `SlotExtractor` na etapa `escolha_turma` (escolha entre opções de turma/curso oferecidas)
-- [ ] 3.4.6 Escrever teste de regressão cobrindo as 5 etapas com resposta natural do lead (fora de sim/não/número)
+- [x] 3.4.1 Integrar `SlotExtractor` na etapa `qualif_medico` (confirmação de elegibilidade médica)
+- [x] 3.4.2 Integrar `SlotExtractor` na etapa objetivo (objetivo com o sistema/produto de interesse)
+- [x] 3.4.3 Integrar `SlotExtractor` na etapa `qualif_experiencia` (experiência corporal prévia)
+- [x] 3.4.4 Integrar `SlotExtractor` na etapa `qualif_especialidade` (especialidade informada)
+- [x] 3.4.5 Integrar `SlotExtractor` na etapa `escolha_turma` (escolha entre opções de turma/curso oferecidas)
+- [x] 3.4.6 Escrever teste de regressão cobrindo as 5 etapas com resposta natural do lead (fora de sim/não/número)
 
 ### 3.5 Guarda contra reversão silenciosa de fato consolidado `[A]`
 
 Ref: Spec Edge Cases; `checklists/requirements.md` CHK014
 
-- [ ] 3.5.1 Impedir reversão silenciosa de um dado de qualificação já consolidado sem qualificação explícita e de alta confiança em contrário
-- [ ] 3.5.2 Escrever teste: lead já classificado (ex.: médico) responde de forma ambígua → dado não é revertido sem sinal explícito forte
+- [x] 3.5.1 Impedir reversão silenciosa de um dado de qualificação já consolidado sem qualificação explícita e de alta confiança em contrário
+- [x] 3.5.2 Escrever teste: lead já classificado (ex.: médico) responde de forma ambígua → dado não é revertido sem sinal explícito forte
 
 ---
 

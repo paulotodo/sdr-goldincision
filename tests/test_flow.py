@@ -58,6 +58,7 @@ from app.core.flow import (
     _saudacao,
 )
 from app.core.intent import ClassificacaoIntencao, Idioma
+from app.core.interpret import SlotQualificacao
 from app.core.memory import SessionContext
 
 # ---------------------------------------------------------------------------
@@ -138,13 +139,17 @@ class MockResponder:
 class StubFlowEngine(FlowEngine):
     """FlowEngine REAL com a leitura da Base stubada (sem Postgres)."""
 
-    def __init__(self, intent, responder, *, apres=None, link=None, knowledge="BASE"):
+    def __init__(
+        self, intent, responder, *, apres=None, link=None, knowledge="BASE",
+        slot_extractor=None,
+    ):
         super().__init__(
             db_session=None,
             intent_classifier=intent,
             memory_manager=MockMemory(),
             responder=responder,
             nidia_phone="+55 21 97423-9844",
+            slot_extractor=slot_extractor,
         )
         # apres: dict slug → texto; link: dict (slug,idioma) → url
         self._apres = apres or {}
@@ -1148,3 +1153,223 @@ async def test_contrato_json_precisa_handoff_true_vira_action_handoff():
 
     assert r.action == "handoff"
     assert r.response_text == "Vou conectar você com nossa equipe."
+
+
+# ===========================================================================
+# Interpretacao Agentica / Slot-Filling por etapa (Pilar 8, FASE 3)
+#
+# FR-013: fast-path deterministico roda PRIMEIRO — resolvido, o LLM NUNCA e
+# chamado. FR-014/016: fallback agentico via SlotExtractor quando o fast-path
+# nao resolve, usando known_facts/historico para desambiguar. FR-015:
+# confianca < limiar -> "nao entendido" -> reformula (nunca adivinha).
+# FASE 3.5/CHK014: guarda contra reversao silenciosa de fato consolidado.
+# ===========================================================================
+
+
+class MockSlotExtractor:
+    """Fallback agentico mockado: mapeia mensagem -> SlotQualificacao. Registra
+    toda invocacao para assert de curto-circuito do fast-path (FR-013/3.3.4)."""
+
+    def __init__(self, respostas: Optional[dict] = None, default: Optional[SlotQualificacao] = None):
+        self.respostas = respostas or {}
+        self.default = default or SlotQualificacao(valor=None, confianca=0.0)
+        self.calls: list[str] = []
+
+    async def extract(self, slot_schema, user_message, contexto=""):
+        self.calls.append(slot_schema.get("nome"))
+        return self.respostas.get(user_message, self.default)
+
+
+@pytest.mark.asyncio
+async def test_slotfilling_fastpath_resolvido_nao_invoca_llm():
+    """FR-013/3.3.2/3.3.4: fast-path resolvendo ("sim, sou médico") NUNCA
+    aciona o SlotExtractor (assert not-called)."""
+    slot_extractor = MockSlotExtractor()
+    eng = engine(ClassificacaoIntencao.CURSO_ONLINE, slot_extractor=slot_extractor)
+    ctx = make_context(caminho=1, etapa=ETAPA_QUALIF_MEDICO)
+
+    r = await eng.process(1, "sim, sou médico", ctx)
+
+    assert ctx.eh_medico is True
+    assert slot_extractor.calls == []
+    assert r.etapa != ETAPA_QUALIF_MEDICO
+
+
+@pytest.mark.asyncio
+async def test_slotfilling_fallback_eh_medico_frase_natural():
+    """3.4.1/3.4.6: frase natural fora de sim/nao ("trabalho nessa area ha
+    alguns anos") nao casa no fast-path -> fallback agentico preenche o slot."""
+    msg = "trabalho nessa area ha alguns anos"
+    slot_extractor = MockSlotExtractor(
+        {msg: SlotQualificacao(valor="sim", confianca=0.85)}
+    )
+    eng = engine(ClassificacaoIntencao.CURSO_ONLINE, slot_extractor=slot_extractor)
+    ctx = make_context(caminho=1, etapa=ETAPA_QUALIF_MEDICO)
+
+    r = await eng.process(1, msg, ctx)
+
+    assert ctx.eh_medico is True
+    assert slot_extractor.calls == ["elegibilidade_medica"]
+    assert r.etapa != ETAPA_QUALIF_MEDICO
+
+
+@pytest.mark.asyncio
+async def test_slotfilling_fallback_experiencia_corporal_frase_natural():
+    """3.4.3: fallback cobre experiencia_corporal com frase natural."""
+    msg = "trabalho nessa area ha alguns anos"
+    slot_extractor = MockSlotExtractor(
+        {msg: SlotQualificacao(valor="sim", confianca=0.8)}
+    )
+    eng = engine(ClassificacaoIntencao.CURSOS_PRESENCIAIS, slot_extractor=slot_extractor)
+    ctx = make_context(caminho=2, etapa=ETAPA_QUALIF_EXPERIENCIA, eh_medico=True)
+
+    r = await eng.process(1, msg, ctx)
+
+    assert ctx.experiencia_corporal is True
+    assert slot_extractor.calls == ["experiencia_corporal"]
+    assert r.etapa == ETAPA_ESCOLHA_TURMA
+
+
+@pytest.mark.asyncio
+async def test_slotfilling_fallback_especialidade_frase_natural():
+    """3.4.4: fallback cobre especialidade com frase natural (sem os termos
+    deterministicos 'dermatolog'/'plastica'/'vascular')."""
+    msg = "sou formado em uma area cirurgica bem especifica"
+    slot_extractor = MockSlotExtractor(
+        {msg: SlotQualificacao(valor="dermatologia", confianca=0.9)}
+    )
+    eng = engine(ClassificacaoIntencao.CURSOS_PRESENCIAIS, slot_extractor=slot_extractor)
+    ctx = make_context(
+        caminho=2, etapa=ETAPA_QUALIF_ESPECIALIDADE,
+        eh_medico=True, experiencia_corporal=False,
+    )
+
+    r = await eng.process(1, msg, ctx)
+
+    assert ctx.especialidade == "dermatologia"
+    assert slot_extractor.calls == ["especialidade"]
+    assert r.etapa == ETAPA_ESCOLHA_TURMA
+
+
+@pytest.mark.asyncio
+async def test_slotfilling_fallback_escolha_turma_frase_natural():
+    """3.4.5: fallback cobre escolha_turma com frase natural (sem SP/Barcelona
+    /numero explicito)."""
+    msg = "prefiro a que for mais cedo no calendario"
+    slot_extractor = MockSlotExtractor(
+        {msg: SlotQualificacao(valor="barcelona", confianca=0.75)}
+    )
+    apres = {"hg360-barcelona": "APRES_HG360_BCN"}
+    eng = engine(
+        ClassificacaoIntencao.CURSOS_PRESENCIAIS, slot_extractor=slot_extractor, apres=apres,
+    )
+    ctx = make_context(
+        caminho=2, etapa=ETAPA_ESCOLHA_TURMA, eh_medico=True, experiencia_corporal=True,
+    )
+
+    r = await eng.process(1, msg, ctx)
+
+    assert ctx.produto_interesse == "hg360-barcelona"
+    assert slot_extractor.calls == ["escolha_turma"]
+    assert "APRES_HG360_BCN" in r.response_text
+
+
+@pytest.mark.asyncio
+async def test_slotfilling_fallback_objetivo_sistema_frase_natural():
+    """3.4.2: fallback cobre objetivo (Caminho 3 / ETAPA 2) com frase natural."""
+    msg = "quero entender melhor as opcoes antes de decidir"
+    slot_extractor = MockSlotExtractor(
+        {msg: SlotQualificacao(valor="incorporar", confianca=0.8)}
+    )
+    eng = engine(ClassificacaoIntencao.SISTEMA_GOLDINCISION, slot_extractor=slot_extractor)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    r = await eng.process(1, msg, ctx)
+
+    assert slot_extractor.calls == ["objetivo_sistema"]
+    assert r.etapa == ETAPA_SISTEMA_LICENCIAMENTO
+
+
+@pytest.mark.asyncio
+async def test_slotfilling_confianca_abaixo_do_limiar_reformula_nunca_adivinha():
+    """3.2.3/3.4.6: confianca abaixo do limiar (SLOT_CONFIDENCE_THRESHOLD=0.6
+    default) -> "nao entendido" -> reformula, NUNCA preenche o slot com o
+    valor de baixa confianca. Usa Caminho 2 (cursos_presenciais) — reformula
+    incondicional (sem o atalho de pergunta-direta do Caminho 1)."""
+    msg = "trabalho nessa area ha alguns anos"
+    slot_extractor = MockSlotExtractor(
+        {msg: SlotQualificacao(valor="sim", confianca=0.3)}
+    )
+    eng = engine(ClassificacaoIntencao.CURSOS_PRESENCIAIS, slot_extractor=slot_extractor)
+    ctx = make_context(caminho=2, etapa=ETAPA_QUALIF_MEDICO)
+
+    r = await eng.process(1, msg, ctx)
+
+    assert ctx.eh_medico is None  # nao adivinhou
+    assert slot_extractor.calls == ["elegibilidade_medica"]
+    assert r.etapa == ETAPA_QUALIF_MEDICO  # reformula, permanece na etapa
+
+
+@pytest.mark.asyncio
+async def test_slotfilling_sem_slot_extractor_configurado_reformula():
+    """Retrocompat (FASE 3, sem quebrar Onda 1/FASE1/FASE2): quando o
+    FlowEngine e construido sem slot_extractor (default None), fast-path que
+    nao resolve cai direto em "nao entendido" -> reformula (sem erro)."""
+    eng = engine(ClassificacaoIntencao.CURSOS_PRESENCIAIS)  # sem slot_extractor
+    ctx = make_context(caminho=2, etapa=ETAPA_QUALIF_MEDICO)
+
+    r = await eng.process(1, "trabalho nessa area ha alguns anos", ctx)
+
+    assert ctx.eh_medico is None
+    assert r.etapa == ETAPA_QUALIF_MEDICO
+
+
+# ---------------------------------------------------------------------------
+# Guarda contra reversao silenciosa de fato consolidado (FASE 3.5 / CHK014)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reversao_fastpath_explicito_sempre_permitida():
+    """Fast-path (sinal explicito/deterministico) SEMPRE pode reverter um
+    fato ja consolidado — ex.: lead corrige explicitamente 'na verdade nao
+    sou médico'."""
+    eng = engine(ClassificacaoIntencao.CURSO_ONLINE)
+    ctx = make_context(caminho=1, eh_medico=True)
+
+    resolvido = await eng._resolver_eh_medico(ctx, "não sou médico")
+
+    assert resolvido is False
+
+
+@pytest.mark.asyncio
+async def test_reversao_llm_confianca_moderada_nao_reverte_fato_consolidado():
+    """3.5.1/3.5.2: lead ja classificado como medico responde de forma
+    ambigua (fallback agentico, confianca MODERADA — aceita pelo limiar de
+    slot mas abaixo do limiar de reversao) -> dado NAO e revertido."""
+    msg = "estou reavaliando minha area de atuacao ultimamente"
+    slot_extractor = MockSlotExtractor(
+        {msg: SlotQualificacao(valor="nao", confianca=0.7)}
+    )
+    eng = engine(ClassificacaoIntencao.CURSO_ONLINE, slot_extractor=slot_extractor)
+    ctx = make_context(caminho=1, eh_medico=True)
+
+    resolvido = await eng._resolver_eh_medico(ctx, msg)
+
+    assert resolvido is True  # mantem o fato ja consolidado, nao reverte
+
+
+@pytest.mark.asyncio
+async def test_reversao_llm_confianca_muito_alta_reverte_fato_consolidado():
+    """Contraponto: confianca MUITO alta (>= LIMIAR_CONFIANCA_REVERSAO) do
+    fallback agentico e um sinal forte o suficiente para reverter."""
+    msg = "recebi uma noticia relacionada a minha situacao junto ao conselho"
+    slot_extractor = MockSlotExtractor(
+        {msg: SlotQualificacao(valor="nao", confianca=0.95)}
+    )
+    eng = engine(ClassificacaoIntencao.CURSO_ONLINE, slot_extractor=slot_extractor)
+    ctx = make_context(caminho=1, eh_medico=True)
+
+    resolvido = await eng._resolver_eh_medico(ctx, msg)
+
+    assert resolvido is False

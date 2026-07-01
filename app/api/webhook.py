@@ -255,6 +255,7 @@ async def _handle_engine(
     from app.core.fidelity import FidelityGate
     from app.core.flow import FlowEngine, _tent_count
     from app.core.intent import IntentClassifier
+    from app.core.interpret import SlotExtractor
     from app.core.memory import MemoryManager
     from app.core.responder import GroundedResponder
     from app.integrations.chatmaster import make_chatmaster_client
@@ -347,12 +348,14 @@ async def _handle_engine(
                 max_tokens=cfg.reasoning_max_tokens,
                 fidelity_gate=fidelity_gate,
             )
+            slot_extractor = SlotExtractor(openai_client=openai_client)
             engine = FlowEngine(
                 db_session=db_session,
                 intent_classifier=intent_classifier,
                 memory_manager=memory_manager,
                 responder=responder,
                 nidia_phone=cfg.nidia_phone or _NIDIA_DEFAULT,
+                slot_extractor=slot_extractor,
             )
 
             # Carregar contexto da sessao (DB + Redis)

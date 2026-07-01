@@ -19,6 +19,7 @@ Pipeline de processamento (tasks 3.1 + 3.2):
 from __future__ import annotations
 
 import hmac
+import json
 import logging
 import time
 from typing import Optional
@@ -168,6 +169,65 @@ async def _bump_ultima_interacao(chamado_id: int) -> Optional[float]:
             exc_info=True,
         )
         return None
+
+
+async def _load_overflow(chamado_id: int) -> tuple[list, Optional[str]]:
+    """
+    Le os blocos de overflow bufferizados (JSON list) + idioma do hash
+    `estado:{chamadoId}` para o FlowEngine RETOMAR ("pode continuar") em vez de
+    descartar o restante. Fail-open: qualquer erro/corrupcao -> ([], None).
+    Chamado ANTES de `engine.process()` (hidrata `context.overflow_blocos`).
+    """
+    try:
+        redis = _get_redis()
+        key = redis_keys.estado_key(chamado_id)
+        raw = await redis.hget(key, redis_keys.OVERFLOW_BLOCOS_FIELD)
+        idi = await redis.hget(key, redis_keys.OVERFLOW_IDIOMA_FIELD)
+        if raw is None:
+            return [], None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        if isinstance(idi, bytes):
+            idi = idi.decode("utf-8")
+        blocos = json.loads(raw)
+        if not isinstance(blocos, list):
+            return [], None
+        return [str(b) for b in blocos], (idi or None)
+    except Exception:
+        logger.warning(
+            "webhook: falha ao ler overflow chamado_id=%s", chamado_id, exc_info=True
+        )
+        return [], None
+
+
+async def _persist_overflow(
+    chamado_id: int, blocos: list, idioma: str
+) -> None:
+    """
+    Persiste (ou LIMPA) o buffer de overflow apos o envio: se sobraram blocos
+    (turno excedeu o teto), grava-os (JSON) + idioma; senao apaga os campos.
+    Fail-open (nunca gateia o turno). Chamado APOS `send_message_blocks`.
+    """
+    try:
+        redis = _get_redis()
+        key = redis_keys.estado_key(chamado_id)
+        if blocos:
+            await redis.hset(
+                key, redis_keys.OVERFLOW_BLOCOS_FIELD, json.dumps(blocos)
+            )
+            await redis.hset(key, redis_keys.OVERFLOW_IDIOMA_FIELD, idioma or "pt")
+        else:
+            await redis.hdel(
+                key,
+                redis_keys.OVERFLOW_BLOCOS_FIELD,
+                redis_keys.OVERFLOW_IDIOMA_FIELD,
+            )
+    except Exception:
+        logger.warning(
+            "webhook: falha ao persistir overflow chamado_id=%s",
+            chamado_id,
+            exc_info=True,
+        )
 
 
 async def _handle_reset(chamado_id: int, sender: Optional[str]) -> None:
@@ -398,6 +458,13 @@ async def _handle_engine(
             # acima: o MESMO turno precisa decidir retomada/sessao-nova).
             context.horas_inatividade = await _bump_ultima_interacao(chamado_id)
 
+            # Overflow de turno (anti-rajada): hidrata o buffer de blocos ainda
+            # nao entregues do turno anterior, para o motor RETOMAR ("pode
+            # continuar") em vez de descartar o restante e cair em abstencao.
+            context.overflow_blocos, context.overflow_idioma = await _load_overflow(
+                chamado_id
+            )
+
             # Processar com o motor conversacional
             flow_result = await engine.process(context.ticket_id, user_message, context)
 
@@ -485,10 +552,19 @@ async def _handle_engine(
             if sender and flow_result.response_text:
                 if cfg.chatmaster_token:
                     async with make_chatmaster_client(cfg) as cm_client:
-                        _turno_evt["n_blocos_enviados"] = await cm_client.send_message_blocks(
+                        _send_result = await cm_client.send_message_blocks(
                             str(sender),
                             flow_result.response_text,
                             idioma=context.idioma,
+                        )
+                        _turno_evt["n_blocos_enviados"] = _send_result.n_enviados
+                        # Overflow (anti-rajada): bufferiza os blocos ainda NAO
+                        # entregues (ou LIMPA se nada sobrou) para o proximo turno
+                        # retomar via "pode continuar" — em vez de descarta-los.
+                        await _persist_overflow(
+                            chamado_id,
+                            _send_result.blocos_restantes,
+                            context.idioma,
                         )
                         if flow_result.action == "handoff":
                             try:

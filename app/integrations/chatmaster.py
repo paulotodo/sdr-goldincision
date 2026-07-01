@@ -33,6 +33,7 @@ import asyncio
 import logging
 import re
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 import httpx
@@ -80,6 +81,15 @@ _OVERFLOW_NOTICE = {
 def overflow_notice(idioma: str = "pt") -> str:
     """Convite curto (anti-rajada) no idioma do lead (fallback PT)."""
     return _OVERFLOW_NOTICE.get(idioma) or _OVERFLOW_NOTICE["pt"]
+
+
+@dataclass(frozen=True)
+class SendResult:
+    """Resultado de `send_message_blocks`: quantos blocos foram enviados e quais
+    (conteudo real) sobraram por overflow do teto por turno (a bufferizar/retomar)."""
+
+    n_enviados: int
+    blocos_restantes: list[str]
 
 
 class _Pacer:
@@ -333,30 +343,36 @@ class ChatMasterClient:
 
     async def send_message_blocks(
         self, number: str, text: str, idioma: str = "pt"
-    ) -> int:
+    ) -> "SendResult":
         """
         Divide texto em blocos curtos e envia cada um em ordem, com pacing.
 
         Anti-rajada: nunca envia mais que `max_msgs_per_turn` mensagens por turno.
-        Se o split gerar mais blocos que o teto, envia os primeiros N-1 e consolida
-        o restante num unico bloco curto com convite (em vez de despejar todos).
+        Se o split gerar mais blocos que o teto, envia os primeiros N-1, o convite
+        curto (`overflow_notice`) como ultima mensagem, e RETORNA os blocos ainda
+        NAO entregues em `blocos_restantes` — para o chamador (webhook) bufferiza-los
+        em Redis e RETOMAR no proximo turno ("pode continuar"), em vez de descartar
+        o restante (bug: promessa quebrada + resposta caindo em abstencao/handoff).
 
         Uma pausa de `inter_block_delay_seconds` e inserida entre blocos para
         preservar a ordem de entrega no WhatsApp; o _Pacer garante o intervalo
         minimo global da Meta/BSP.
         Apresentacoes verbatim (FR-010): texto nunca e reescrito, apenas fragmentado.
 
-        Retorna o numero de blocos efetivamente enviados (0 se texto vazio) —
-        usado por `log_turno.n_blocos_enviados` (US5/FR-015).
+        Retorna `SendResult(n_enviados, blocos_restantes)` — `n_enviados` alimenta
+        `log_turno.n_blocos_enviados` (US5/FR-015); `blocos_restantes` (lista, vazia
+        se nao houve overflow) e o conteudo verbatim a bufferizar.
         """
         blocks = _split_into_blocks(text)
         if not blocks:
-            return 0
+            return SendResult(0, [])
 
+        restantes: list[str] = []
         cap = self._max_msgs_per_turn
         if cap and len(blocks) > cap:
-            # Mantem os primeiros N-1 blocos e substitui o restante por um convite
-            # curto (anti-rajada). Nunca excede o teto por turno.
+            # Mantem os primeiros N-1 blocos + convite; os demais (conteudo real
+            # ainda nao entregue) sao retornados para bufferizacao/retomada.
+            restantes = blocks[cap - 1 :]
             blocks = blocks[: cap - 1] + [overflow_notice(idioma)]
 
         for i, block in enumerate(blocks):
@@ -364,7 +380,7 @@ class ChatMasterClient:
             if i < len(blocks) - 1 and self._inter_block_delay > 0:
                 await asyncio.sleep(self._inter_block_delay)
 
-        return len(blocks)
+        return SendResult(len(blocks), restantes)
 
     # ------------------------------------------------------------------
     # Handoff de ticket (FR-022/023/024)

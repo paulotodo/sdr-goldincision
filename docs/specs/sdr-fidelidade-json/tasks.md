@@ -229,9 +229,9 @@ Ref: `plan.md` Estratégia de testes (RESTRIÇÃO INVIOLÁVEL)
 
 Ref: `plan.md` Restrição de entrega; RESTRIÇÕES INVIOLÁVEIS
 
-- [ ] 7.3.1 Commitar todas as mudanças na branch `feature/sdr-fidelidade-json`
-- [ ] 7.3.2 Abrir PR contra `master` (protegido) com resumo do escopo (Pilar 5, Pilar 6, interpretação agêntica) — NÃO mergear
-- [ ] 7.3.3 Vincular o PR à spec/plan/checklist/tasks desta feature na descrição
+- [x] 7.3.1 Commitar todas as mudanças na branch `feature/sdr-fidelidade-json`
+- [x] 7.3.2 Abrir PR contra `master` (protegido) com resumo do escopo (Pilar 5, Pilar 6, interpretação agêntica) — NÃO mergear
+- [x] 7.3.3 Vincular o PR à spec/plan/checklist/tasks desta feature na descrição
 
 ---
 

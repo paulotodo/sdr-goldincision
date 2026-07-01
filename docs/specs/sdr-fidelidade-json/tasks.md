@@ -212,18 +212,18 @@ Ref: `plan.md` Estratégia de testes; Spec US1 Independent Test; SC-003
 
 Ref: FR-025, FR-026, FR-027; SC-006, SC-007; `plan.md` Preservação Onda 1
 
-- [ ] 7.1.1 Rodar a suíte completa confirmando que o anti-loop `_MAX_TENTATIVAS=3` (não fundido) continua funcionando
-- [ ] 7.1.2 Confirmar que `max_msgs_per_turn=4`, `_Pacer`+429, idempotência, lock, gate IA=77 e `debounce_seconds=8` permanecem intactos
-- [ ] 7.1.3 Confirmar que os contadores anti-tentativas e o teto de mensagens coexistem com os novos mecanismos sem fusão (FR-026)
-- [ ] 7.1.4 Rodar teste de regressão dedicado confirmando 100% de cobertura aprovada da suíte da Onda 1 (SC-007)
+- [x] 7.1.1 Rodar a suíte completa confirmando que o anti-loop `_MAX_TENTATIVAS=3` (não fundido) continua funcionando
+- [x] 7.1.2 Confirmar que `max_msgs_per_turn=4`, `_Pacer`+429, idempotência, lock, gate IA=77 e `debounce_seconds=8` permanecem intactos
+- [x] 7.1.3 Confirmar que os contadores anti-tentativas e o teto de mensagens coexistem com os novos mecanismos sem fusão (FR-026)
+- [x] 7.1.4 Rodar teste de regressão dedicado confirmando 100% de cobertura aprovada da suíte da Onda 1 (SC-007)
 
 ### 7.2 Qualidade final (suíte verde + lint) `[A]`
 
 Ref: `plan.md` Estratégia de testes (RESTRIÇÃO INVIOLÁVEL)
 
-- [ ] 7.2.1 Rodar a suíte completa de testes (unit + integração, FlowEngine real, mock só do client OpenAI) e confirmar 100% verde
-- [ ] 7.2.2 Rodar `ruff` e corrigir todos os achados até lint limpo
-- [ ] 7.2.3 Rodar `validate-tasks-template.sh` e `validate-docs-rendered` sobre este `tasks.md` e demais artefatos gerados
+- [x] 7.2.1 Rodar a suíte completa de testes (unit + integração, FlowEngine real, mock só do client OpenAI) e confirmar 100% verde
+- [x] 7.2.2 Rodar `ruff` e corrigir todos os achados até lint limpo
+- [x] 7.2.3 Rodar `validate-tasks-template.sh` e `validate-docs-rendered` sobre este `tasks.md` e demais artefatos gerados
 
 ### 7.3 Abertura de PR (sem merge) `[A]`
 

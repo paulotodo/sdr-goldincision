@@ -40,27 +40,27 @@ Ref: `checklists/requirements.md` CHK009, CHK014, CHK022, CHK029, CHK030 (itens 
 
 Ref: Spec FR-001, FR-007; `data-model.md` §1; `plan.md` Pilar 6
 
-- [ ] 1.1.1 Criar `app/core/contracts.py` com o modelo Pydantic `RespostaEstruturada {texto, fontes, precisa_handoff, confianca, idioma}`, `extra="forbid"`
-- [ ] 1.1.2 Validar tipos e obrigatoriedade dos campos (`confianca`: float 0-1; `fontes`: list[str]; `idioma`: enum PT/EN/ES)
-- [ ] 1.1.3 Escrever testes unitários de validação (payload válido / malformado / campo extra rejeitado) em `tests/test_contracts.py`
+- [x] 1.1.1 Criar `app/core/contracts.py` com o modelo Pydantic `RespostaEstruturada {texto, fontes, precisa_handoff, confianca, idioma}`, `extra="forbid"`
+- [x] 1.1.2 Validar tipos e obrigatoriedade dos campos (`confianca`: float 0-1; `fontes`: list[str]; `idioma`: enum PT/EN/ES)
+- [x] 1.1.3 Escrever testes unitários de validação (payload válido / malformado / campo extra rejeitado) em `tests/test_contracts.py`
 
 ### 1.2 Integrar contrato no GroundedResponder.generate() `[A]`
 
 Ref: `plan.md` `app/core/responder.py:165`; FR-002, FR-003, FR-004, FR-005
 
-- [ ] 1.2.1 Alterar `generate()` para retornar `RespostaEstruturada` via `response_format=json_schema` (gpt-4o)
-- [ ] 1.2.2 Aplicar `temperature` 0–0.2 quando a etapa trata de fatos (preço/data/condição/elegibilidade)
-- [ ] 1.2.3 Implementar 1 retry em pacote malformado; 2ª falha → `precisa_handoff=True` (nunca conteúdo improvisado)
-- [ ] 1.2.4 Conferir idioma do pacote contra o idioma já identificado da conversa; divergência = pacote inválido (FR-005)
-- [ ] 1.2.5 Escrever testes (mock só do client OpenAI): payload válido, malformado+retry+handoff, temperatura por contexto factual, divergência de idioma
+- [x] 1.2.1 Alterar `generate()` para retornar `RespostaEstruturada` via `response_format=json_schema` (gpt-4o)
+- [x] 1.2.2 Aplicar `temperature` 0–0.2 quando a etapa trata de fatos (preço/data/condição/elegibilidade)
+- [x] 1.2.3 Implementar 1 retry em pacote malformado; 2ª falha → `precisa_handoff=True` (nunca conteúdo improvisado)
+- [x] 1.2.4 Conferir idioma do pacote contra o idioma já identificado da conversa; divergência = pacote inválido (FR-005)
+- [x] 1.2.5 Escrever testes (mock só do client OpenAI): payload válido, malformado+retry+handoff, temperatura por contexto factual, divergência de idioma
 
 ### 1.3 Consumir contrato no FlowEngine sem expor decisão de fluxo `[C]`
 
 Ref: `plan.md` `app/core/flow.py:1403,1409`; FR-006, FR-007
 
-- [ ] 1.3.1 Adaptar consumo em `flow.py:1403/1409` para extrair `(texto, handoff)` do pacote — FlowEngine nunca vê o objeto `RespostaEstruturada` completo
-- [ ] 1.3.2 Confirmar que verbatim (apresentações/menus/textos oficiais) NUNCA passa por `RespostaEstruturada` (FR-007)
-- [ ] 1.3.3 Escrever teste de regressão (FlowEngine real, mock só client) garantindo que a transição de estado permanece 100% determinística mesmo com o pacote presente
+- [x] 1.3.1 Adaptar consumo em `flow.py:1403/1409` para extrair `(texto, handoff)` do pacote — FlowEngine nunca vê o objeto `RespostaEstruturada` completo
+- [x] 1.3.2 Confirmar que verbatim (apresentações/menus/textos oficiais) NUNCA passa por `RespostaEstruturada` (FR-007)
+- [x] 1.3.3 Escrever teste de regressão (FlowEngine real, mock só client) garantindo que a transição de estado permanece 100% determinística mesmo com o pacote presente
 
 ---
 

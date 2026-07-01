@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from app.core.contracts import RespostaEstruturada
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -61,8 +63,9 @@ FORMATO DAS RESPOSTAS:
 - Emojis de forma natural e moderada.
 - Responda no idioma do lead: {idioma_nome}
 
-HANDOFF: se a informação não estiver na base, finalize com:
-"Vou conectar você com nossa equipe para mais informações." [HANDOFF_NECESSARIO]
+HANDOFF: se a informação não estiver na base, escreva o texto:
+"Vou conectar você com nossa equipe para mais informações."
+e defina precisa_handoff=true no pacote de resposta estruturada.
 """
 
 _IDIOMA_NOMES = {"pt": "Português", "en": "English", "es": "Español"}
@@ -139,12 +142,42 @@ _SLUG_PROMPTS = {
     "licenciamento-internacional": _SYSTEM_LICENCIAMENTO,
 }
 
-# Marcador de handoff na resposta do LLM
-HANDOFF_MARKER = "[HANDOFF_NECESSARIO]"
-
 # Teto de tokens da geracao (concisao): respostas objetivas e resumidas, sem
 # despejar apresentacoes inteiras. Configuravel via settings.reasoning_max_tokens.
 REASONING_MAX_TOKENS = 280
+
+# FR-002/FR-003: 1 retry em pacote malformado (2 tentativas no total); 2a falha
+# -> precisa_handoff=True (nunca conteudo improvisado).
+_MAX_TENTATIVAS_CONTRATO = 2
+
+# FR-004: temperatura baixa (0-0.2) quando a etapa/mensagem trata de fatos
+# sensiveis (preco/data/condicao comercial/elegibilidade); demais casos mantem
+# o padrao conversacional (0.3).
+_TEMPERATURA_FACTUAL = 0.2
+_TEMPERATURA_PADRAO = 0.3
+_PALAVRAS_CONTEXTO_FACTUAL = (
+    "preço",
+    "preco",
+    "valor",
+    "valores",
+    "parcel",
+    "desconto",
+    "promo",
+    "data",
+    "prazo",
+    "turma",
+    "vaga",
+    "disponibilidade",
+    "elegib",
+    "crm",
+)
+
+
+def _e_contexto_factual(etapa: str, user_message: str) -> bool:
+    """FR-004: identifica se a etapa/mensagem corrente trata de fatos sensiveis
+    (preco/data/condicao comercial/elegibilidade), exigindo temperatura baixa."""
+    texto = f"{etapa or ''} {user_message or ''}".lower()
+    return any(palavra in texto for palavra in _PALAVRAS_CONTEXTO_FACTUAL)
 
 
 class GroundedResponder:
@@ -189,8 +222,13 @@ class GroundedResponder:
 
         Returns:
             (texto_resposta, handoff_necessario)
-            - texto_resposta: resposta para enviar ao lead (sem o marcador HANDOFF)
-            - handoff_necessario: True se o marcador HANDOFF_NECESSARIO apareceu
+            - texto_resposta: resposta para enviar ao lead (campo `texto` do
+              pacote `RespostaEstruturada`)
+            - handoff_necessario: campo `precisa_handoff` do pacote, ou True se
+              o pacote nao pode ser validado apos 1 retry (FR-002/FR-003)
+
+        FlowEngine NUNCA recebe o objeto `RespostaEstruturada` (FR-006) — apenas
+        esta 2-tupla.
         """
         idioma_nome = _IDIOMA_NOMES.get(idioma, "Português")
         # Resolve o prompt por SLUG (corrige a colisao de indices numericos: os
@@ -241,28 +279,76 @@ class GroundedResponder:
             }
         )
 
-        try:
-            raw_response = await self._client.chat_reasoning(
-                messages, max_tokens=self._max_tokens, temperature=0.3
-            )
-        except Exception as exc:
-            logger.error("responder: falha na geracao de resposta. err=%s", exc)
-            return _fallback_error_response(idioma), False
+        # FR-004: temperatura baixa (0-0.2) em contexto factual (preco/data/
+        # condicao comercial/elegibilidade); demais casos mantem o padrao 0.3.
+        temperature = (
+            _TEMPERATURA_FACTUAL
+            if _e_contexto_factual(etapa, user_message)
+            else _TEMPERATURA_PADRAO
+        )
 
-        # Verificar marcador de handoff
-        handoff = HANDOFF_MARKER in raw_response
-        clean_response = raw_response.replace(HANDOFF_MARKER, "").strip()
+        # FR-002/FR-003: gera via response_format=json_schema, valida contra
+        # RespostaEstruturada, com 1 retry em pacote malformado (2 tentativas no
+        # total). FR-005: idioma do pacote deve bater com o idioma ja
+        # identificado da conversa — divergencia conta como pacote invalido.
+        pacote: Optional[RespostaEstruturada] = None
+        for tentativa in range(_MAX_TENTATIVAS_CONTRATO):
+            try:
+                raw_response = await self._client.chat_reasoning_json(
+                    messages,
+                    RespostaEstruturada,
+                    max_tokens=self._max_tokens,
+                    temperature=temperature,
+                )
+                candidato = RespostaEstruturada.model_validate_json(raw_response)
+            except Exception as exc:
+                logger.warning(
+                    "responder: pacote malformado (tentativa %s/%s). err=%s",
+                    tentativa + 1,
+                    _MAX_TENTATIVAS_CONTRATO,
+                    exc,
+                )
+                continue
+
+            if candidato.idioma != idioma:
+                logger.warning(
+                    "responder: idioma do pacote diverge do esperado "
+                    "(esperado=%s recebido=%s, tentativa %s/%s)",
+                    idioma,
+                    candidato.idioma,
+                    tentativa + 1,
+                    _MAX_TENTATIVAS_CONTRATO,
+                )
+                continue
+
+            pacote = candidato
+            break
+
+        if pacote is None:
+            # 2a falha (malformado ou idioma divergente) -> handoff, nunca
+            # conteudo improvisado (FR-002/FR-003).
+            logger.error(
+                "responder: pacote invalido apos %s tentativas -> handoff. "
+                "caminho=%s etapa=%s idioma=%s",
+                _MAX_TENTATIVAS_CONTRATO,
+                caminho,
+                etapa,
+                idioma,
+            )
+            return _fallback_error_response(idioma), True
 
         logger.info(
-            "responder: caminho=%s etapa=%s idioma=%s handoff=%s chars=%s",
+            "responder: caminho=%s etapa=%s idioma=%s handoff=%s confianca=%.2f chars=%s",
             caminho,
             etapa,
             idioma,
-            handoff,
-            len(clean_response),
+            pacote.precisa_handoff,
+            pacote.confianca,
+            len(pacote.texto),
         )
 
-        return clean_response, handoff
+        # FR-006: FlowEngine nunca ve o objeto RespostaEstruturada, so a 2-tupla.
+        return pacote.texto, pacote.precisa_handoff
 
     async def generate_menu(self, idioma: str = "pt") -> str:
         """

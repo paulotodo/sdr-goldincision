@@ -21,6 +21,7 @@ Cobertura (plano "Jornada Humanizada", §5):
 from __future__ import annotations
 
 from typing import Optional
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -1064,3 +1065,86 @@ async def test_turnos_no_no_ortogonal_ao_contador_anti_loop():
     # Turno reconhecido -> etapa_funil (contador anti-loop) NAO e tocado.
     assert "etapa_funil" not in r.updates
     assert _tent_count(ctx, ETAPA_DUVIDAS) == 0
+
+
+# ===========================================================================
+# FASE 1 (sdr-fidelidade-json) — Contrato JSON estruturado (task 1.3.3)
+#
+# Regressao: FlowEngine REAL + GroundedResponder REAL, mock SOMENTE do client
+# OpenAI (nunca o motor). Garante que a transicao de estado permanece 100%
+# deterministica mesmo com o pacote RespostaEstruturada presente (FR-006):
+# variar confianca/fontes do pacote (campos que o FlowEngine nunca inspeciona)
+# nao pode mudar caminho/etapa/action resultantes.
+# ===========================================================================
+
+def _fake_openai_client_json(*, texto: str, precisa_handoff: bool, idioma: str = "pt"):
+    """Fake do client OpenAI (nao do motor): devolve um RespostaEstruturada
+    serializado, como o `chat_reasoning_json` real devolveria."""
+    from app.core.contracts import RespostaEstruturada
+
+    client = AsyncMock()
+
+    async def _chat_reasoning_json(messages, response_model, max_tokens=1024, temperature=0.3):
+        pacote = RespostaEstruturada(
+            texto=texto,
+            fontes=["base-teste"],
+            precisa_handoff=precisa_handoff,
+            confianca=0.77,  # valor arbitrario: FlowEngine nunca le este campo
+            idioma=idioma,
+        )
+        return pacote.model_dump_json()
+
+    client.chat_reasoning_json = _chat_reasoning_json
+    return client
+
+
+@pytest.mark.asyncio
+async def test_contrato_json_nao_altera_determinismo_da_transicao():
+    """Duas execucoes com pacotes RespostaEstruturada distintos (confianca e
+    fontes diferentes, mesmo texto/handoff) produzem a MESMA transicao de
+    estado — o FlowEngine so consome (texto, handoff), nunca o objeto."""
+    from app.core.responder import GroundedResponder
+
+    ctx1 = make_context(caminho=1)
+    ctx2 = make_context(caminho=1)
+
+    resp1 = GroundedResponder(
+        openai_client=_fake_openai_client_json(texto="Resposta A", precisa_handoff=False)
+    )
+    resp2 = GroundedResponder(
+        openai_client=_fake_openai_client_json(texto="Resposta A", precisa_handoff=False)
+    )
+
+    eng1 = StubFlowEngine(MockIntent(ClassificacaoIntencao.CURSO_ONLINE), resp1)
+    eng2 = StubFlowEngine(MockIntent(ClassificacaoIntencao.CURSO_ONLINE), resp2)
+
+    r1 = await eng1.process(1, "Quanto custa o curso online?", ctx1)
+    r2 = await eng2.process(1, "Quanto custa o curso online?", ctx2)
+
+    # Mesma entrada + mesmo (texto, handoff) do pacote -> mesma transicao,
+    # apesar de confianca/fontes serem detalhes internos do pacote.
+    assert r1.caminho == r2.caminho == CaminhoMapaMestre.CURSO_ONLINE_HG
+    assert r1.etapa == r2.etapa == ETAPA_DUVIDAS
+    assert r1.action == r2.action == "continue"
+    assert r1.response_text == r2.response_text == "Resposta A"
+
+
+@pytest.mark.asyncio
+async def test_contrato_json_precisa_handoff_true_vira_action_handoff():
+    """precisa_handoff=True no pacote (2-tupla) e o UNICO sinal que o
+    FlowEngine usa para decidir handoff — nenhum outro campo do pacote
+    (confianca/fontes) participa da decisao de fluxo (FR-006)."""
+    from app.core.responder import GroundedResponder
+
+    ctx = make_context(caminho=1)
+    resp = GroundedResponder(
+        openai_client=_fake_openai_client_json(
+            texto="Vou conectar você com nossa equipe.", precisa_handoff=True
+        )
+    )
+    eng = StubFlowEngine(MockIntent(ClassificacaoIntencao.CURSO_ONLINE), resp)
+
+    r = await eng.process(1, "quero um desconto especial no curso online", ctx)
+
+    assert r.action == "handoff"
+    assert r.response_text == "Vou conectar você com nossa equipe."

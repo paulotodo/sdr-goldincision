@@ -33,6 +33,10 @@ TURNOS_SESSAO_FIELD = "turnos_sessao"            # contador de turnos da sessao 
 TURNOS_NO_NO_FIELD = "turnos_no_no"              # contador de turnos no NO/etapa corrente
 TURNOS_NO_NO_ETAPA_FIELD = "turnos_no_no_etapa"  # marca qual etapa o contador acima referencia
 
+# Timeout de inatividade e reengajamento (US2, FASE 5, task 5.1.1). Tambem
+# vive no hash `estado:{chamadoId}`, ao lado dos campos acima.
+ULTIMA_INTERACAO_FIELD = "ultima_interacao"      # epoch seconds (int) da ultima interacao
+
 
 def idemp_key(chamado_id: int, payload_hash: str) -> str:
     """

@@ -195,27 +195,27 @@ Ref: Spec FR-011, FR-012; research.md Decision 6; `main.py`, `debounce.py`
 
 Ref: Spec FR-008; data-model.md `ultima_interacao`; research.md Decision 8
 
-- [ ] 5.1.1 Implementar `HSET ultima_interacao <epoch>` a cada turno
+- [x] 5.1.1 Implementar `HSET ultima_interacao <epoch>` a cada turno
   processado
-- [ ] 5.1.2 Implementar fail-open: leitura ausente/corrompida do
+- [x] 5.1.2 Implementar fail-open: leitura ausente/corrompida do
   timestamp ⇒ tratar como interação recente (não dispara
   retomada/expiração espúria)
-- [ ] 5.1.3 Escrever teste de fail-open de `ultima_interacao`
+- [x] 5.1.3 Escrever teste de fail-open de `ultima_interacao`
 
 ### 5.2 Retomada cordial por reengajamento `[A]`
 
 Ref: Spec FR-009; Acceptance Scenarios 1 e 3, US2; Edge Cases item 4
 
-- [ ] 5.2.1 Implementar detecção lazy no início de `engine.process`:
+- [x] 5.2.1 Implementar detecção lazy no início de `engine.process`:
   `REENGAJAMENTO_HORAS < delta <= EXPIRA_SESSAO_HORAS` ⇒ retomada
   cordial i18n (`_T`/`_t`), sem reiniciar a jornada nem perder o estado
   corrente
-- [ ] 5.2.2 Garantir que etapa/pergunta pendente (ex.: menu) continua
+- [x] 5.2.2 Garantir que etapa/pergunta pendente (ex.: menu) continua
   válida após a retomada, sem reapresentar o menu inteiro (Edge Case
   item 4)
-- [ ] 5.2.3 Escrever teste: gap moderado ⇒ retomada sem perda de
+- [x] 5.2.3 Escrever teste: gap moderado ⇒ retomada sem perda de
   contexto de fluxo (Acceptance Scenario 1, US2; SC-003)
-- [ ] 5.2.4 Escrever teste: gap abaixo de ambos os limiares ⇒ nenhuma
+- [x] 5.2.4 Escrever teste: gap abaixo de ambos os limiares ⇒ nenhuma
   mensagem de retomada emitida, comportamento inalterado (Acceptance
   Scenario 3, US2)
 
@@ -224,15 +224,15 @@ Ref: Spec FR-009; Acceptance Scenarios 1 e 3, US2; Edge Cases item 4
 Ref: Spec FR-010; `memory.py`; Acceptance Scenario 2, US2; SC-004;
 checklists/requirements.md CHK005
 
-- [ ] 5.3.1 Implementar detecção de `delta > EXPIRA_SESSAO_HORAS` ⇒
+- [x] 5.3.1 Implementar detecção de `delta > EXPIRA_SESSAO_HORAS` ⇒
   etapa retorna à saudação inicial (sessão tratada como nova)
-- [ ] 5.3.2 Garantir preservação de elegibilidade médica, idioma,
+- [x] 5.3.2 Garantir preservação de elegibilidade médica, idioma,
   especialidade, experiência e interesse do Contato (`memory.py`) sem
   re-perguntar nenhum dado já capturado — usar `Contato` como única
   fonte da verdade da lista de campos preservados (fecha CHK005)
-- [ ] 5.3.3 Escrever teste: expiração de sessão preserva 100% dos campos
+- [x] 5.3.3 Escrever teste: expiração de sessão preserva 100% dos campos
   de perfil já capturados (Acceptance Scenario 2, US2; SC-004)
-- [ ] 5.3.4 Escrever teste de regressão: nenhuma pergunta de perfil já
+- [x] 5.3.4 Escrever teste de regressão: nenhuma pergunta de perfil já
   respondido é repetida após expiração de sessão
 
 ---

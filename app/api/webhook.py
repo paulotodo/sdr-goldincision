@@ -124,6 +124,52 @@ async def _bump_turnos_no_no(chamado_id: int, etapa: Optional[str]) -> int:
         return 0
 
 
+async def _bump_ultima_interacao(chamado_id: int) -> Optional[float]:
+    """
+    Le a marca de `ultima_interacao` anterior (epoch seconds) do hash
+    `estado:{chamadoId}`, grava a marca ATUAL (HSET) e retorna quantas horas
+    se passaram desde a interacao anterior (US2, FASE 5, task 5.1.1).
+
+    Fail-open (task 5.1.2/5.2.4 — Edge Case: perda do timestamp em restart
+    do Redis, valor corrompido, ou 1o turno da sessao): retorna `None`,
+    tratado por `FlowEngine._aplicar_reengajamento_pre` como "interacao
+    recente" — NENHUMA retomada/expiracao e disparada. Mesmo padrao
+    fail-open de `_bump_turnos_sessao`/`_bump_turnos_no_no`.
+
+    Chamada ANTES de `engine.process()` (mesma ordem dos bumps de orcamento
+    de turnos) para que o MESMO turno ja veja o gap calculado.
+    """
+    try:
+        redis = _get_redis()
+        key = redis_keys.estado_key(chamado_id)
+        agora = time.time()
+        anterior_raw = await redis.hget(key, redis_keys.ULTIMA_INTERACAO_FIELD)
+        await redis.hset(key, redis_keys.ULTIMA_INTERACAO_FIELD, int(agora))
+
+        if anterior_raw is None:
+            return None
+        if isinstance(anterior_raw, bytes):
+            anterior_raw = anterior_raw.decode("utf-8")
+        anterior = float(anterior_raw)
+        if anterior <= 0:
+            return None
+        delta_horas = (agora - anterior) / 3600.0
+        if delta_horas < 0:
+            # Relogio retrocedeu ou timestamp futuro corrompido — fail-open.
+            return None
+        return delta_horas
+    except (TypeError, ValueError):
+        # Timestamp corrompido/nao numerico — fail-open (tratado como recente).
+        return None
+    except Exception:
+        logger.warning(
+            "webhook: falha ao ler/gravar ultima_interacao chamado_id=%s",
+            chamado_id,
+            exc_info=True,
+        )
+        return None
+
+
 async def _handle_reset(chamado_id: int, sender: Optional[str]) -> None:
     """
     Processa o comando #reset: so para numeros de teste autorizados.
@@ -320,6 +366,12 @@ async def _handle_engine(
             # estava ao enviar esta mensagem.
             context.turnos_sessao = await _bump_turnos_sessao(chamado_id)
             context.turnos_no_no = await _bump_turnos_no_no(chamado_id, context.etapa)
+
+            # Timeout de inatividade e reengajamento (US2, FASE 5, FR-008):
+            # marca a interacao ATUAL e calcula o gap desde a anterior —
+            # tambem ANTES de engine.process() (mesmo motivo dos bumps
+            # acima: o MESMO turno precisa decidir retomada/sessao-nova).
+            context.horas_inatividade = await _bump_ultima_interacao(chamado_id)
 
             # Processar com o motor conversacional
             flow_result = await engine.process(context.ticket_id, user_message, context)

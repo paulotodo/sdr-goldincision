@@ -85,6 +85,15 @@ class SessionContext:
     # atual — a fonte da verdade e sempre o Redis (fail-open ⇒ 0).
     turnos_sessao: int = 0
     turnos_no_no: int = 0
+    # Timeout de inatividade e reengajamento (US2, FASE 5, FR-008/FR-009):
+    # horas decorridas desde a `ultima_interacao` anterior (hash Redis
+    # estado:{chamadoId}), calculadas pelo CALLER (webhook.py
+    # `_bump_ultima_interacao`, fail-open) ANTES de FlowEngine.process().
+    # None ⇒ primeiro turno da sessao OU leitura ausente/corrompida —
+    # tratado como interacao recente (nenhuma retomada/expiracao disparada).
+    # Transiente: nunca persistido, apenas plumbing do turno atual (mesmo
+    # padrao de turnos_sessao/turnos_no_no).
+    horas_inatividade: Optional[float] = None
 
 
 class MemoryManager:

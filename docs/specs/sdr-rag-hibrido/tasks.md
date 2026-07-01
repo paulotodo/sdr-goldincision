@@ -105,35 +105,35 @@ Ref: Spec FR-007 (`tipo='base'`); `plan.md` `app/api/admin.py`; dec-020 finding 
 
 Ref: Spec FR-002; `data-model.md` §2; `plan.md` `app/core/retrieval.py`
 
-- [ ] 4.1.1 Implementar `HybridRetriever.buscar()` em `app/core/retrieval.py` com cláusula `WHERE (curso_id = :curso_id OR curso_id IS NULL) AND idioma = :idioma AND ativo` aplicada ANTES de qualquer ranqueamento
-- [ ] 4.1.2 Escrever teste confirmando que chunk de outro produto NUNCA aparece como candidato, mesmo com score alto
+- [x] 4.1.1 Implementar `HybridRetriever.buscar()` em `app/core/retrieval.py` com cláusula `WHERE (curso_id = :curso_id OR curso_id IS NULL) AND idioma = :idioma AND ativo` aplicada ANTES de qualquer ranqueamento <!-- SqlAlchemyChunkRepository (WHERE real) + _aplicar_pre_filtro em memoria (defesa em profundidade, dec-037) -->
+- [x] 4.1.2 Escrever teste confirmando que chunk de outro produto NUNCA aparece como candidato, mesmo com score alto <!-- tests/test_retrieval.py::test_chunk_de_outro_produto_nunca_aparece_mesmo_com_score_alto -->
 
 ### 4.2 Busca vetorial + textual + fusão RRF `[C]`
 
 Ref: Spec FR-001, FR-003, FR-004; `research.md` Decision 4
 
-- [ ] 4.2.1 Busca vetorial `k=RAG_K_VETORIAL` (cosine, índice HNSW)
-- [ ] 4.2.2 Busca textual `k=RAG_K_TEXTUAL` (tsquery contra `search_vector`, índice GIN)
-- [ ] 4.2.3 Fusão RRF → `score_combinado = 0.6*vetorial + 0.4*textual_normalizado`
-- [ ] 4.2.4 Selecionar top-`RAG_TOP_K` por `score_combinado` desc
-- [ ] 4.2.5 Escrever teste de ranking (RRF produz a ordem esperada em cenário sintético com overlap parcial vetorial/textual)
+- [x] 4.2.1 Busca vetorial `k=RAG_K_VETORIAL` (cosine, índice HNSW) <!-- SqlAlchemyChunkRepository.buscar_vetorial, Chunk.embedding.cosine_distance() -->
+- [x] 4.2.2 Busca textual `k=RAG_K_TEXTUAL` (tsquery contra `search_vector`, índice GIN) <!-- SqlAlchemyChunkRepository.buscar_textual, func.plainto_tsquery + ts_rank -->
+- [x] 4.2.3 Fusão RRF → `score_combinado = 0.6*vetorial + 0.4*textual_normalizado` <!-- _fundir_por_rrf + _rerankear -->
+- [x] 4.2.4 Selecionar top-`RAG_TOP_K` por `score_combinado` desc <!-- HybridRetriever._buscar_interno -->
+- [x] 4.2.5 Escrever teste de ranking (RRF produz a ordem esperada em cenário sintético com overlap parcial vetorial/textual) <!-- tests/test_retrieval.py::test_rerankear_produz_ordem_esperada_com_overlap_parcial -->
 
 ### 4.3 Abstenção por limiar, timeout e erro `[C]`
 
 Ref: Spec FR-005, FR-006, FR-021; `research.md` Decision 6/7
 
-- [ ] 4.3.1 `abster=True` quando `chunks` vazio OU `chunks[0].score_combinado < RAG_LIMIAR_ABSTENCAO`
-- [ ] 4.3.2 Timeout duro `RAG_RETRIEVAL_TIMEOUT_SECONDS=3.0` → `abster=True, motivo_abstencao="indisponivel"`
-- [ ] 4.3.3 Capturar qualquer exceção (extensão/tabela `chunk` inexistente antes do swap) como `abster=True` — nunca propagar erro ao chamador
-- [ ] 4.3.4 Escrever teste: timeout == abstenção; erro de DB/extensão ausente == abstenção (simula o cenário pré-swap pgvector)
+- [x] 4.3.1 `abster=True` quando `chunks` vazio OU `chunks[0].score_combinado < RAG_LIMIAR_ABSTENCAO`
+- [x] 4.3.2 Timeout duro `RAG_RETRIEVAL_TIMEOUT_SECONDS=3.0` → `abster=True, motivo_abstencao="indisponivel"` <!-- asyncio.wait_for em HybridRetriever.buscar -->
+- [x] 4.3.3 Capturar qualquer exceção (extensão/tabela `chunk` inexistente antes do swap) como `abster=True` — nunca propagar erro ao chamador
+- [x] 4.3.4 Escrever teste: timeout == abstenção; erro de DB/extensão ausente == abstenção (simula o cenário pré-swap pgvector) <!-- test_timeout_e_tratado_como_abstencao_indisponivel, test_erro_de_db_extensao_ausente_e_tratado_como_abstencao_indisponivel -->
 
 ### 4.4 Reserva de idioma sem fallback cross-idioma `[A]`
 
 Ref: Spec FR-013; `research.md` Decision 11
 
-- [ ] 4.4.1 Pré-filtro por idioma aplicado nas 3 combinações PT/EN/ES
-- [ ] 4.4.2 Ausência de chunk equivalente no idioma do lead → abstenção (nunca fallback cross-idioma, diferente do `_load_faq` atual)
-- [ ] 4.4.3 Escrever teste cobrindo os 3 idiomas + cenário de ausência total no idioma do lead
+- [x] 4.4.1 Pré-filtro por idioma aplicado nas 3 combinações PT/EN/ES
+- [x] 4.4.2 Ausência de chunk equivalente no idioma do lead → abstenção (nunca fallback cross-idioma, diferente do `_load_faq` atual)
+- [x] 4.4.3 Escrever teste cobrindo os 3 idiomas + cenário de ausência total no idioma do lead <!-- test_pre_filtro_por_idioma_aplicado_nos_3_idiomas, test_ausencia_de_chunk_no_idioma_do_lead_gera_abstencao_sem_fallback -->
 
 ---
 

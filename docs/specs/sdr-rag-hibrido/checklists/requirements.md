@@ -15,7 +15,7 @@
 - [x] CHK005 - Está definida a unidade de significado (objeção/FAQ/seção de base) e sua origem exclusiva nos documentos oficiais já curados? [Completude, Spec §FR-007, FR-008] {auto}
 - [x] CHK006 - Está definido que a representação semântica é calculada uma única vez e nunca recalculada a cada boot? [Completude, Spec §FR-009] {auto}
 - [x] CHK007 - Está definido o comportamento de indisponibilidade do mecanismo de recuperação (== ausência de fonte, nunca fallback ao dump bruto)? [Completude, Spec §FR-021] {auto}
-- [ ] CHK008 - Está definido um mecanismo concreto de calibração do `RAG_LIMIAR_ABSTENCAO` ao longo do tempo (quem revisa, com que frequência, contra qual conjunto), ou fica em aberto até haver dados reais de produção? [Gap, Spec §FR-022, US4] {humano}
+- [x] CHK008 - Está definido um mecanismo concreto de calibração do `RAG_LIMIAR_ABSTENCAO` ao longo do tempo (quem revisa, com que frequência, contra qual conjunto), ou fica em aberto até haver dados reais de produção? [Gap, Spec §FR-022, US4] {humano} — **Resolvido task 0.1.1 (Onda 3)**: fica em aberto até haver dados reais de produção, com processo interino documentado — dono do produto (GoldIncision) revisa trimestralmente uma amostra de turnos com `abster=True` extraída via `fonte_ids`/`motivo_abstencao` em `log_turno` (consulta direta, FR-022/US4, task 8.2.2), contra o valor vigente de `rag_limiar_abstencao` (default `0.45`, `app/config.py`). Sem cadência automatizada nem endpoint dedicado (Escopo Excluído). Ponto de partida arbitrário sujeito a revisão quando houver volume suficiente de conversas reais pós-swap pgvector.
 - [x] CHK009 - A pré-condição de infraestrutura (pgvector não habilitado hoje) está formalizada como requisito funcional numerado, e não apenas como nota de rodapé? [Completude, Spec §FR-024-INFRA-PRECONDITION] {auto}
 
 ## Clareza de Requisitos
@@ -24,7 +24,7 @@
 - [x] CHK011 - A quantidade de candidatos avaliados (k) e o tamanho do conjunto final (top-k) são valores concretos, não "alguns"/"poucos"? [Clareza, Spec §FR-004, Plan §RAG_K_VETORIAL/RAG_K_TEXTUAL/RAG_TOP_K] {auto}
 - [x] CHK012 - O que conta como "seção coerente de documento de base" está ancorado numa via concreta de curadoria (API de admin), não em heurística automática subjetiva? [Clareza, Spec §Clarifications Q2] {auto}
 - [x] CHK013 - O comportamento de reserva quando não existe conteúdo no idioma do lead está explicitamente definido como abstenção (não fallback cross-idioma), inclusive a ressalva sobre o comportamento atual de `_load_faq` ser diferente? [Clareza, Spec §Clarifications Q5, Research Decision 11] {auto}
-- [ ] CHK014 - O peso da combinação `score_combinado = 0.6*vetorial + 0.4*textual` (Research Decision 4) está justificado com dado empírico, ou é um ponto de partida arbitrário sujeito a calibração futura junto do LIMIAR? [Ambiguity, Research §Decision-4] {humano}
+- [x] CHK014 - O peso da combinação `score_combinado = 0.6*vetorial + 0.4*textual` (Research Decision 4) está justificado com dado empírico, ou é um ponto de partida arbitrário sujeito a calibração futura junto do LIMIAR? [Ambiguity, Research §Decision-4] {humano} — **Resolvido task 0.1.2 (Onda 3)**: documentado explicitamente como ponto de partida arbitrário (sem dado empírico de produção disponível ainda — pré-swap pgvector, sem histórico de buscas reais). Pesos `0.6/0.4` favorecem levemente a similaridade semântica (vetorial) sobre a correspondência exata de termos (textual), julgamento de engenharia alinhado ao domínio (perguntas livres em linguagem natural, não busca por palavra-chave). Sujeito à mesma calibração futura de CHK008 (revisão trimestral do dono do produto contra amostra real via `fonte_ids`/`log_turno`).
 
 ## Consistência de Requisitos
 
@@ -39,7 +39,7 @@
 - [x] CHK020 - SC-001 define um piso numérico (>=95%) medido contra um conjunto de casos de referência concreto, não "a maioria das perguntas"? [Mensurabilidade, Spec §SC-001] {auto}
 - [x] CHK021 - SC-002 é objetivamente verificável (100% de abstenção quando não há fonte, zero conteúdo inventado)? [Mensurabilidade, Spec §SC-002] {auto}
 - [x] CHK022 - SC-003 é mensurável como contagem zero de vazamento cross-produto em conjunto de referência com produtos semelhantes? [Mensurabilidade, Spec §SC-003] {auto}
-- [ ] CHK023 - SC-004 ("tempo de resposta não aumenta de forma perceptível... comparado à linha de base anterior") define a metodologia/fonte concreta de medição da linha de base, ou fica em aberto até execução (mesmo gap já identificado na Onda 2, CHK022)? [Ambiguity, Spec §SC-004] {humano}
+- [x] CHK023 - SC-004 ("tempo de resposta não aumenta de forma perceptível... comparado à linha de base anterior") define a metodologia/fonte concreta de medição da linha de base, ou fica em aberto até execução (mesmo gap já identificado na Onda 2, CHK022)? [Ambiguity, Spec §SC-004] {humano} — **Resolvido task 0.1.3 (Onda 3)**: fica em aberto até execução, mesmo tratamento do gap herdado CHK022 (Onda 2). Metodologia interina proposta para quando o golden set estendido (FASE 9) rodar: comparar `latency_ms` registrado em `evento_log`/`log_turno` para turnos `ETAPA_DUVIDAS` ANTES (sem RAG, resposta direta) vs. DEPOIS (com `HybridRetriever.buscar()` + timeout duro `RAG_RETRIEVAL_TIMEOUT_SECONDS=3.0`) do merge desta feature, usando os próprios logs de produção como linha de base — sem processo de medição dedicado adicional além do já existente em `app/observability/log.py`.
 - [x] CHK024 - SC-005 amarra rastreabilidade a um mecanismo concreto (`last_fonte_ids` + `log_turno`), não a "auditoria manual"? [Mensurabilidade, Spec §SC-005, Data-Model §3] {auto}
 
 ## Cobertura de Cenários / Edge Cases
@@ -76,9 +76,13 @@
   `[Gap]`/`[Ambiguity]`).
 - Items `{humano}` ficam `[ ]` aguardando decisão do dono do produto — não bloqueiam
   `create-tasks`.
-- **5 itens em aberto**: CHK008, CHK014, CHK023 (`{humano}` — julgamento de
+- **5 itens em aberto originalmente**: CHK008, CHK014, CHK023 (`{humano}` — julgamento de
   produto/calibração empírica, não bloqueiam `create-tasks`) e CHK034/CHK035
   (`{auto}` com `[Gap]` real — **viram tasks obrigatórias** por já estarem cobertas
   por Decisão auditável dec-020, mesmo padrão do CHK033 herdado da Onda 2).
+- **CHK008/CHK014/CHK023 resolvidos na Onda 3 (task 0.1, FASE 0)**: documentados como
+  pontos de partida arbitrários/processos interinos sujeitos a calibração futura com
+  dados reais de produção — ver notas inline em cada item. Não exigiram pausa humana
+  (resolução explicitamente permitida pelo próprio texto do gap).
 - Nenhum `[Conflict]` encontrado entre FR-001..FR-024-INFRA-PRECONDITION e as
   RESTRIÇÕES INVIOLÁVEIS.

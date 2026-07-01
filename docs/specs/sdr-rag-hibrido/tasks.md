@@ -30,9 +30,9 @@ como nota obrigatória do corpo do PR — nunca como task de código.
 
 Ref: `checklists/requirements.md` CHK008, CHK014, CHK023 (itens `{humano}` em aberto)
 
-- [ ] 0.1.1 Decidir com o dono do produto o mecanismo concreto de calibração do `RAG_LIMIAR_ABSTENCAO` (quem revisa, com que frequência, contra qual conjunto) (Ref: CHK008, FR-022/US4)
-- [ ] 0.1.2 Justificar com dado empírico (ou documentar como ponto de partida arbitrário sujeito a calibração futura junto do limiar) o peso `score_combinado = 0.6*vetorial + 0.4*textual` (Ref: CHK014, `research.md` Decision 4)
-- [ ] 0.1.3 Definir a metodologia/fonte concreta de medição da "linha de base" citada em SC-004 antes da execução do golden set (Ref: CHK023, mesmo gap identificado em CHK022 da Onda 2)
+- [x] 0.1.1 Decidir com o dono do produto o mecanismo concreto de calibração do `RAG_LIMIAR_ABSTENCAO` (quem revisa, com que frequência, contra qual conjunto) (Ref: CHK008, FR-022/US4) <!-- resolvido: documentado como processo interino em checklists/requirements.md CHK008 -->
+- [x] 0.1.2 Justificar com dado empírico (ou documentar como ponto de partida arbitrário sujeito a calibração futura junto do limiar) o peso `score_combinado = 0.6*vetorial + 0.4*textual` (Ref: CHK014, `research.md` Decision 4) <!-- resolvido: documentado como ponto de partida arbitrário em checklists/requirements.md CHK014 -->
+- [x] 0.1.3 Definir a metodologia/fonte concreta de medição da "linha de base" citada em SC-004 antes da execução do golden set (Ref: CHK023, mesmo gap identificado em CHK022 da Onda 2) <!-- resolvido: documentado como metodologia interina em checklists/requirements.md CHK023 -->
 
 ---
 
@@ -42,19 +42,19 @@ Ref: `checklists/requirements.md` CHK008, CHK014, CHK023 (itens `{humano}` em ab
 
 Ref: Spec FR-007, FR-008; `data-model.md` §1; `plan.md` `app/repository/models.py`
 
-- [ ] 1.1.1 Criar classe `Chunk(Base)` em `app/repository/models.py` com colunas `id`, `curso_id` (FK nullable), `tipo`, `idioma`, `conteudo`, `fonte_tabela`, `fonte_id`, `embedding` (`Vector(1536)`, nullable), `ativo`, `criado_em`, `atualizado_em`
-- [ ] 1.1.2 Aplicar `UniqueConstraint(fonte_tabela, fonte_id, idioma)` + `CheckConstraint` `tipo IN ('objecao','faq','base')` + `idioma IN ('pt','en','es')`
-- [ ] 1.1.3 Escrever teste unitário validando as constraints (unique violada rejeita; `tipo`/`idioma` inválido rejeita)
+- [x] 1.1.1 Criar classe `Chunk(Base)` em `app/repository/models.py` com colunas `id`, `curso_id` (FK nullable), `tipo`, `idioma`, `conteudo`, `fonte_tabela`, `fonte_id`, `embedding` (`Vector(1536)`, nullable), `ativo`, `criado_em`, `atualizado_em`
+- [x] 1.1.2 Aplicar `UniqueConstraint(fonte_tabela, fonte_id, idioma)` + `CheckConstraint` `tipo IN ('objecao','faq','base')` + `idioma IN ('pt','en','es')`
+- [x] 1.1.3 Escrever teste unitário validando as constraints (unique violada rejeita; `tipo`/`idioma` inválido rejeita) <!-- tests/test_chunk_model.py, SQLite em memoria (sem Postgres real) -->
 
 ### 1.2 Migration Alembic tolerante a pgvector ausente `[C]`
 
 Ref: Spec FR-024-INFRA-PRECONDITION; `research.md` Decision 0; `data-model.md` §1
 
-- [ ] 1.2.1 Criar `migrations/versions/<rev>_add_chunk_pgvector.py` com `op.execute("CREATE EXTENSION IF NOT EXISTS vector")` tolerante a falha (não interrompe o `upgrade` se a extensão ainda não puder ser criada, antes do swap de imagem do Postgres)
-- [ ] 1.2.2 Criar tabela `chunk` + coluna gerada `search_vector` (`tsvector` STORED, `CASE` por idioma pt/en/es)
-- [ ] 1.2.3 Criar os 3 índices: HNSW (`embedding`, `vector_cosine_ops`, `m=16`/`ef_construction=64`), GIN (`search_vector`), composto (`curso_id, idioma, ativo`)
-- [ ] 1.2.4 Adicionar `"pgvector>=0.3.0"` (ou versão estável mais recente disponível) ao `pyproject.toml` — pin de versão explícito (dec-020 finding #3, LOW, A03 Supply Chain Failures)
-- [ ] 1.2.5 Escrever teste de migration: `upgrade`/`downgrade` limpos; simular Postgres sem a extensão `vector` disponível e confirmar que o restante do `alembic upgrade head` não quebra (mesmo padrão try/except de `app/main.py:102-118`)
+- [x] 1.2.1 Criar `migrations/versions/<rev>_add_chunk_pgvector.py` com `op.execute("CREATE EXTENSION IF NOT EXISTS vector")` tolerante a falha (não interrompe o `upgrade` se a extensão ainda não puder ser criada, antes do swap de imagem do Postgres) <!-- migrations/versions/e5f6a7b8c9d0_add_chunk_pgvector.py -->
+- [x] 1.2.2 Criar tabela `chunk` + coluna gerada `search_vector` (`tsvector` STORED, `CASE` por idioma pt/en/es)
+- [x] 1.2.3 Criar os 3 índices: HNSW (`embedding`, `vector_cosine_ops`, `m=16`/`ef_construction=64`), GIN (`search_vector`), composto (`curso_id, idioma, ativo`)
+- [x] 1.2.4 Adicionar `"pgvector>=0.3.0"` (ou versão estável mais recente disponível) ao `pyproject.toml` — pin de versão explícito (dec-020 finding #3, LOW, A03 Supply Chain Failures)
+- [x] 1.2.5 Escrever teste de migration: `upgrade`/`downgrade` limpos; simular Postgres sem a extensão `vector` disponível e confirmar que o restante do `alembic upgrade head` não quebra (mesmo padrão try/except de `app/main.py:102-118`) <!-- tests/test_migration_chunk.py -->
 
 ---
 

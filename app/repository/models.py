@@ -13,6 +13,7 @@ Entidades (data-model.md):
 - CursoLink: links de inscricao por idioma
 - CursoMidia: midias por curso
 - EventoLog: observabilidade estruturada
+- Chunk: unidade de conhecimento recuperavel (RAG hibrido, Onda 3)
 
 Convencao: colunas em snake_case; DTOs Pydantic em camelCase (via mapper.py).
 Implementacao completa: FASE 2, task 2.1.
@@ -22,6 +23,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -29,13 +31,14 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     SmallInteger,
     Text,
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -412,3 +415,62 @@ class Faq(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class Chunk(Base):
+    """Unidade de conhecimento recuperavel (RAG hibrido, Onda 3, FR-007).
+
+    Uma objecao, uma entrada de FAQ, ou uma secao de base curada pelo admin.
+    NUNCA fatiada por tamanho fixo — sempre 1 unidade de significado completo
+    (data-model.md §1). `search_vector` e coluna GERADA (STORED) definida na
+    migration Alembic, nao mapeada com expressao aqui (usa `.with_variant`
+    apenas para permitir testes de constraint contra SQLite em memoria, sem
+    exigir Postgres real — Postgres continua recebendo TSVECTOR de verdade).
+    """
+    __tablename__ = "chunk"
+    __table_args__ = (
+        UniqueConstraint("fonte_tabela", "fonte_id", "idioma", name="uq_chunk_fonte"),
+        CheckConstraint("tipo IN ('objecao','faq','base')", name="ck_chunk_tipo"),
+        CheckConstraint("idioma IN ('pt','en','es')", name="ck_chunk_idioma"),
+        Index(
+            "ix_chunk_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index("ix_chunk_search_vector", "search_vector", postgresql_using="gin"),
+        Index("ix_chunk_curso_idioma_ativo", "curso_id", "idioma", "ativo"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # NULL = aplica a todos os cursos (FAQ global, mesmo escopo do `Faq` hoje).
+    curso_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("curso.id", ondelete="CASCADE"), nullable=True,
+    )
+    tipo: Mapped[str] = mapped_column(Text, nullable=False)       # objecao|faq|base
+    idioma: Mapped[str] = mapped_column(Text, nullable=False)     # pt|en|es
+    conteudo: Mapped[str] = mapped_column(Text, nullable=False)   # texto oficial verbatim
+    # Provenancia deterministica (FR-008): de qual tabela/linha de origem este
+    # chunk foi sincronizado (curso_objecao|faq) ou "admin" para tipo=base.
+    fonte_tabela: Mapped[str] = mapped_column(Text, nullable=False)
+    fonte_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Representacao semantica (FR-009): calculada 1x, nunca a cada boot.
+    # NULL ate o rag_seed calcular o embedding.
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536), nullable=True)
+    # Coluna GERADA (STORED) no Postgres — config por idioma via CASE, criada
+    # na migration Alembic. `.with_variant(Text(), "sqlite")` mantem TSVECTOR
+    # real em producao e permite `Base.metadata.create_all()` contra SQLite
+    # em memoria nos testes de constraint (sem exigir Postgres real).
+    search_vector: Mapped[Optional[str]] = mapped_column(
+        TSVECTOR().with_variant(Text(), "sqlite"), nullable=True
+    )
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    atualizado_em: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now(), nullable=True
+    )
+
+    curso: Mapped[Optional["Curso"]] = relationship("Curso")

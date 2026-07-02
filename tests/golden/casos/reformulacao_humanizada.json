@@ -40,7 +40,69 @@
       "esperado": {
         "proxima_acao": "continue",
         "etapa": "qualif_medico",
-        "caminho": 1
+        "caminho": 1,
+        "not_contains": ["Perfeito! 😊", "curso avulso"]
+      }
+    },
+    {
+      "id": "reformulacao_ciclo_variante_2_na_segunda_tentativa_pt",
+      "dimensao": "reformulacao",
+      "mensagem": "xpto blá 2a vez",
+      "estado_inicial": {
+        "caminho": 3, "etapa": "sistema_objetivo",
+        "etapa_funil": "{\"et\": \"sistema_objetivo\", \"n\": 1}"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "sistema_objetivo",
+        "caminho": 3,
+        "contains": ["Sobre o que você comentou, vou reformular para ficar mais claro:"],
+        "not_contains": ["Deixa eu tentar explicar de um outro jeito:", "Perfeito! 😊", "curso avulso"]
+      }
+    },
+    {
+      "id": "reformulacao_limite_tentativas_encaminha_humano_pt",
+      "dimensao": "reformulacao",
+      "mensagem": "xpto blá 3a vez",
+      "estado_inicial": {
+        "caminho": 3, "etapa": "sistema_objetivo",
+        "etapa_funil": "{\"et\": \"sistema_objetivo\", \"n\": 2}"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "caminho": 3,
+        "handoff_destino": "consultores",
+        "contains": ["especialistas"]
+      }
+    },
+    {
+      "id": "reformulacao_sistema_etapa1_2_nao_repete_saudacao_en",
+      "dimensao": "reformulacao",
+      "mensagem": "xpto blah",
+      "estado_inicial": {"caminho": 3, "etapa": "sistema_objetivo", "idioma": "en"},
+      "intent": {"intencao": "ambigua", "idioma": "en"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "sistema_objetivo",
+        "caminho": 3,
+        "contains": ["Let me try explaining that a different way:", "Which of these options best represents your goal?"],
+        "not_contains": ["Perfect! 😊", "standalone course"]
+      }
+    },
+    {
+      "id": "reformulacao_sistema_etapa1_2_nao_repete_saudacao_es",
+      "dimensao": "reformulacao",
+      "mensagem": "xpto blah",
+      "estado_inicial": {"caminho": 3, "etapa": "sistema_objetivo", "idioma": "es"},
+      "intent": {"intencao": "ambigua", "idioma": "es"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "sistema_objetivo",
+        "caminho": 3,
+        "contains": ["Déjame intentar explicarlo de otra manera:", "Cuál de estas opciones representa mejor tu objetivo?"],
+        "not_contains": ["¡Perfecto! 😊", "curso suelto"]
       }
     }
   ]

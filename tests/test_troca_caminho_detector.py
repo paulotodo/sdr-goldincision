@@ -35,6 +35,22 @@ Cobertura:
   ETAPA_QUALIF_MEDICO e compartilhado por Caminho 1 e Caminho 2).
 - 2.3.4 quickstart Cenario 11: correcao para o MESMO caminho ja ativo e
   no-op (sem troca, sem pendencia, sem efeito colateral).
+
+FASE 6 (task 6.1.2 — decisao de estrutura): os testes de unidade do
+lexico/detector para os cenarios 1-13 do quickstart (golden set, task 6.1.1)
+sao ADICIONADOS a este arquivo em vez de criar `tests/test_troca_caminho.py`
+novo (alternativa cogitada em `plan.md` §Structure Decision). Justificativa:
+este arquivo ja e o dedicado a testes de unidade do detector/lexico desde a
+FASE 2 (mesmo escopo tematico), ja importa `engine`/`make_context` de
+`tests/test_flow.py` (StubFlowEngine — FlowEngine REAL) e ja cobre boa parte
+dos cenarios 1/2/4/9/10/11/12 individualmente; criar um arquivo paralelo
+duplicaria fixtures e imports sem necessidade (dec-013, onda-010).
+Cobertura adicional desta FASE (task 6.1.3):
+- anti-regressao fix #9 em nivel de unidade (alem do golden set): resposta
+  legitima de qualificacao ("sou medico") e resposta numerica de menu interno
+  ("1" em ETAPA_SISTEMA_OBJETIVO) nunca alcancam o detector.
+- variantes EN/ES do Cenario 1 (alem do EN ja existente em
+  `test_marcador_explicito_multilingue_en`) e do Cenario 5 (menu texto livre).
 """
 from __future__ import annotations
 
@@ -44,6 +60,7 @@ from app.core.flow import (
     ETAPA_QUALIF_ESPECIALIDADE,
     ETAPA_QUALIF_MEDICO,
     ETAPA_SISTEMA_LICENCIAMENTO,
+    ETAPA_SISTEMA_OBJETIVO,
     CaminhoMapaMestre,
     _detectar_confirmacao,
     _nome_caminho,
@@ -510,3 +527,90 @@ def test_detectar_confirmacao_ainda_funciona_para_consumo_de_pendente():
     assert _detectar_confirmacao("sim") is True
     assert _detectar_confirmacao("não") is False
     assert _detectar_confirmacao("batata") is None
+
+
+# ---------------------------------------------------------------------------
+# FASE 6 (task 6.1.3) -- anti-regressao fix #9 em nivel de unidade: uma
+# resposta RECONHECIDA PELO RESOLVER ESPECIFICO da etapa nunca alcanca o
+# detector de troca de caminho, mesmo quando o texto da resposta nao tem
+# nenhuma relacao com o lexico de produtos/caminhos (satisfeito por
+# construcao, Decision 3/4 -- reforca 2.2.9/2.2.11 com exemplos concretos
+# adicionais citados no prompt de execucao desta fase).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_antiregressao_fix9_sou_medico_nao_dispara_troca_de_caminho():
+    """'sou medico' na etapa de qualificacao medica e reconhecida DIRETO por
+    `_detectar_confirmacao`/`_resolver_eh_medico` -- `_reformular_ou_handoff`
+    (e portanto o detector) nunca e alcancado; nenhum falso-positivo de
+    troca de caminho."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=CaminhoMapaMestre.CURSOS_PRESENCIAIS, etapa=ETAPA_QUALIF_MEDICO)
+
+    r = await eng.process(1, "sou medico", ctx)
+
+    assert ctx.eh_medico is True
+    assert r.caminho == CaminhoMapaMestre.CURSOS_PRESENCIAIS  # nao mudou de caminho
+    assert ctx.troca_caminho_pendente is None
+
+
+@pytest.mark.asyncio
+async def test_antiregressao_fix9_resposta_numerica_em_sistema_objetivo_nao_dispara_troca():
+    """'1' em ETAPA_SISTEMA_OBJETIVO e reconhecida DIRETO por
+    `_detectar_objetivo_sistema` (opcao numerica do proprio no) -- segue o
+    fluxo normal do Caminho 3, nunca e interpretada como troca de caminho
+    (o '1' aqui NAO e o menu inicial de 6 opcoes)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=CaminhoMapaMestre.SISTEMA_GOLDINCISION, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    r = await eng.process(1, "1", ctx)
+
+    assert r.caminho == CaminhoMapaMestre.SISTEMA_GOLDINCISION  # permanece no Caminho 3
+    assert ctx.troca_caminho_pendente is None
+
+
+# ---------------------------------------------------------------------------
+# FASE 6 (task 6.1.3) -- variantes multilingues adicionais do Cenario 1
+# (ES -- o EN ja existe em test_marcador_explicito_multilingue_en) e do
+# Cenario 5 (menu em texto livre, EN/ES) do quickstart, em nivel de unidade.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_marcador_explicito_multilingue_es():
+    """Quickstart Cenario 13: marcador ES ('de hecho') + produto ES."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA, idioma=Idioma.ES)
+    ctx = make_context(
+        caminho=CaminhoMapaMestre.CURSO_ONLINE_HG, etapa=ETAPA_QUALIF_MEDICO,
+        idioma="es",
+    )
+
+    r = await eng.process(1, "de hecho quiero cursos presenciales", ctx)
+
+    assert r.caminho == CaminhoMapaMestre.CURSOS_PRESENCIAIS
+    assert ctx.troca_caminho_pendente is None
+
+
+@pytest.mark.asyncio
+async def test_menu_texto_livre_multilingue_en():
+    """Quickstart Cenario 5/13 (EN): texto livre no menu inicial, sem
+    numero, reconhecido pelo MESMO lexico compartilhado (FR-011)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA, idioma=Idioma.EN)
+    ctx = make_context(caminho=None, etapa="menu", idioma="en")
+
+    r = await eng.process(1, "online course", ctx)
+
+    assert r.caminho == CaminhoMapaMestre.CURSO_ONLINE_HG
+    assert ctx.troca_caminho_pendente is None
+
+
+@pytest.mark.asyncio
+async def test_menu_texto_livre_multilingue_es():
+    """Quickstart Cenario 5/13 (ES): texto livre no menu inicial, sem
+    numero, reconhecido pelo MESMO lexico compartilhado (FR-011)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA, idioma=Idioma.ES)
+    ctx = make_context(caminho=None, etapa="menu", idioma="es")
+
+    r = await eng.process(1, "armonizacion glutea", ctx)
+
+    assert r.caminho == CaminhoMapaMestre.CURSO_ONLINE_HG
+    assert ctx.troca_caminho_pendente is None

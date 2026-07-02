@@ -1,0 +1,93 @@
+{
+  "casos": [
+    {
+      "id": "mtl_cenario5_typo_real_harmonizacao_glutea_pt",
+      "dimensao": "menu_texto_livre",
+      "mensagem": "harmonização glutea",
+      "estado_inicial": {"etapa": "menu"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 1,
+        "etapa": "qualif_medico",
+        "contains": ["Harmonização Glútea"]
+      }
+    },
+    {
+      "id": "mtl_cenario5_curso_presencial_sem_numero_pt",
+      "dimensao": "menu_texto_livre",
+      "mensagem": "curso presencial",
+      "estado_inicial": {"etapa": "menu"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "etapa": "qualif_medico"
+      }
+    },
+    {
+      "id": "mtl_cenario5_online_course_en",
+      "dimensao": "menu_texto_livre",
+      "mensagem": "online course",
+      "estado_inicial": {"etapa": "menu", "idioma": "en"},
+      "intent": {"intencao": "ambigua", "idioma": "en"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 1,
+        "etapa": "qualif_medico"
+      }
+    },
+    {
+      "id": "mtl_cenario5_armonizacion_glutea_es",
+      "dimensao": "menu_texto_livre",
+      "mensagem": "armonizacion glutea",
+      "estado_inicial": {"etapa": "menu", "idioma": "es"},
+      "intent": {"intencao": "ambigua", "idioma": "es"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 1,
+        "etapa": "qualif_medico"
+      }
+    },
+    {
+      "id": "mtl_cenario_as2_menu_ambiguo_2_caminhos_pt",
+      "dimensao": "menu_texto_livre",
+      "mensagem": "curso",
+      "estado_inicial": {"etapa": "menu"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": null,
+        "etapa": "menu",
+        "contains": ["Curso Online HG", "Cursos Presenciais HG"],
+        "not_contains": ["MENU_PT"]
+      }
+    },
+    {
+      "id": "mtl_cenario6_ambiguo_3_ou_mais_cai_no_existente_pt",
+      "dimensao": "menu_texto_livre",
+      "mensagem": "quero curso online e curso presencial e sou aluno",
+      "estado_inicial": {"etapa": "menu"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": null,
+        "etapa": "menu",
+        "contains": ["MENU_PT"]
+      }
+    },
+    {
+      "id": "mtl_cenario_as3_sem_caminho_reconhecivel_nao_trava_pt",
+      "dimensao": "menu_texto_livre",
+      "mensagem": "bom dia, tudo bem?",
+      "estado_inicial": {"etapa": "menu"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": null,
+        "etapa": "menu",
+        "contains": ["MENU_PT"]
+      }
+    }
+  ]
+}

@@ -398,32 +398,80 @@ Ref: quickstart.md Cenário 14; `sdr-turnos-obs/contracts/turno-event.md`
 Ref: research.md Decision 9; quickstart.md Cenários 1-13, 15; plan.md
 §Testing
 
-- [ ] 6.1.1 Adicionar casos em `tests/golden/casos/*.json` cobrindo os
+- [x] 6.1.1 Adicionar casos em `tests/golden/casos/*.json` cobrindo os
   Cenários 1-13 do quickstart (correção de rumo, desambiguação, preservação
   de perfil, resposta legítima nunca desviada, menu texto livre, ambiguidade
   no menu, reformulação sem repetição, limite de tentativas, overflow-resume,
   mesmo caminho ativo, retorno a caminho visitado, PT/EN/ES)
-- [ ] 6.1.2 Decidir (e executar) `tests/test_troca_caminho.py` novo vs.
+  <!-- entregue: tests/golden/casos/troca_caminho.json (NOVO, dimensao
+  troca_caminho, 15 casos: cenarios 1 PT/EN/ES, 2 turno1+turno2, 3, 4, 9
+  (pendente+aceita+negada), 10 (overflow-precedencia), 11 (mesmo caminho
+  no-op), 12 (retorno a caminho visitado), + anti-regressao fix#9 "sou
+  medico"/resposta numerica em sistema_objetivo); tests/golden/casos/
+  menu_texto_livre.json (NOVO, dimensao menu_texto_livre, 7 casos: cenario 5
+  PT (typo real "harmonização glutea")/EN/ES, cenario AS2 desambiguacao 2
+  caminhos, cenario 6 (3+ candidatos cai no existente), cenario AS3 (sem
+  candidato)); tests/golden/casos/reformulacao_humanizada.json (ESTENDIDO, +4
+  casos: ciclo variante 2 na 2a tentativa, limite de tentativas -> handoff,
+  EN/ES do cenario 7 causa-raiz; caso preexistente do transcript real do bug
+  (menu "3" -> "opa... na verdade quero o curso de harmoização glutea")
+  reforcado com not_contains=["Perfeito! 😊","curso avulso"] confirmando que o
+  bloco do caminho 3 nunca e repetido verbatim). Todos os 29 casos novos
+  validados individualmente contra o runner real (`_rodar_caso`) antes de
+  entrar na suite; total golden 66->92 casos + relatorio = 93 itens
+  (`pytest tests/golden -m golden -s`, taxa 100% em todas as dimensoes). -->
+- [x] 6.1.2 Decidir (e executar) `tests/test_troca_caminho.py` novo vs.
   extensão de `tests/test_flow.py` para os testes de unidade do
   léxico/detector (plan.md §Structure Decision, deferido a esta fase)
-- [ ] 6.1.3 Escrever os testes de unidade do léxico/detector usando o
+  <!-- DECISAO: extensao de tests/test_troca_caminho_detector.py (ja
+  existente desde a FASE 2), NAO tests/test_flow.py nem arquivo novo.
+  Justificativa (documentada tambem no topo do arquivo): este arquivo ja e o
+  dedicado a testes de unidade do detector/lexico, ja importa
+  engine()/make_context() de tests/test_flow.py (StubFlowEngine — FlowEngine
+  REAL) e ja cobre boa parte dos cenarios 1/2/4/9/10/11/12 individualmente;
+  um arquivo tests/test_troca_caminho.py paralelo duplicaria fixtures/imports
+  sem necessidade. -->
+- [x] 6.1.3 Escrever os testes de unidade do léxico/detector usando o
   **FlowEngine REAL** via `StubFlowEngine` — mock **somente** do client
   OpenAI (fallback agentico do `SlotExtractor`); não reimplementar `process()`
+  <!-- 5 testes novos em tests/test_troca_caminho_detector.py, todos via
+  engine()/make_context() (StubFlowEngine real, sem reimplementar process()):
+  test_antiregressao_fix9_sou_medico_nao_dispara_troca_de_caminho,
+  test_antiregressao_fix9_resposta_numerica_em_sistema_objetivo_nao_dispara_troca,
+  test_marcador_explicito_multilingue_es, test_menu_texto_livre_multilingue_en,
+  test_menu_texto_livre_multilingue_es. -->
 
 ### 6.2 Executar e verificar o golden set `[A]`
 
 Ref: quickstart.md Cenário 15 e §Verificação global; SC-007
 
-- [ ] 6.2.1 Rodar `python3 -m pytest tests/golden -m golden -s` e confirmar
+- [x] 6.2.1 Rodar `python3 -m pytest tests/golden -m golden -s` e confirmar
   que os casos novos se somam aos 64 já existentes (`sdr-turnos-obs`), com
   relatório por dimensão incluindo `troca_caminho`, `reformulacao`,
   `menu_texto_livre`
-- [ ] 6.2.2 Confirmar que a suíte golden permanece informativa/não-bloqueante,
+  <!-- output literal (2026-07-02): "collected 93 items" ... relatorio:
+  troca_caminho 15/15 (100.0%), reformulacao 7/7 (100.0%), menu_texto_livre
+  7/7 (100.0%), TOTAL 92/92 (100.0%); "93 passed in 0.60s" (92 casos
+  parametrizados + test_golden_relatorio). Baseline pre-FASE6 era 66 casos +
+  1 relatorio = 67 itens (verificado via `pytest tests/golden -m golden -q`
+  antes de qualquer edicao); 93 >= 68 exigido. -->
+- [x] 6.2.2 Confirmar que a suíte golden permanece informativa/não-bloqueante,
   excluída do gate padrão via `addopts = '-m "not golden"'` (mesma decisão
   herdada de `sdr-turnos-obs` Decision 9)
-- [ ] 6.2.3 Teste multilíngue: repetir os Cenários 1, 5 e 7 em EN/ES,
+  <!-- confirmado: pyproject.toml linha 40, addopts = '-m "not golden"'
+  (inalterado, ja configurado de features anteriores) -- `pytest tests/ -q`
+  reporta "93 deselected" (o total golden) sem tocar no gate padrao. -->
+- [x] 6.2.3 Teste multilíngue: repetir os Cenários 1, 5 e 7 em EN/ES,
   confirmando resposta sempre no idioma do lead (SC-007, quickstart Cenário
   13)
+  <!-- golden: tc_cenario1_marcador_explicito_en/es (troca_caminho.json),
+  mtl_cenario5_online_course_en/mtl_cenario5_armonizacion_glutea_es
+  (menu_texto_livre.json), reformulacao_sistema_etapa1_2_nao_repete_saudacao_en/es
+  (reformulacao_humanizada.json) -- todos com asserts de conteudo no idioma
+  do lead (contains textos EN/ES, not_contains textos PT). Unidade:
+  test_marcador_explicito_multilingue_en (ja existente)/es (novo),
+  test_menu_texto_livre_multilingue_en/es (novos) em
+  tests/test_troca_caminho_detector.py. -->
 
 ---
 

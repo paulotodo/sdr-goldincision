@@ -358,17 +358,21 @@ checklists/requirements.md CHK022
 Ref: contracts/turno-event-extensao.md, data-model.md §Evento de Turno;
 Constitution Princípio VI (Isolamento e Segurança de Infraestrutura)
 
-- [ ] 5.1.1 Adicionar parâmetros opcionais (`troca_caminho_origem: int |
+- [x] 5.1.1 Adicionar parâmetros opcionais (`troca_caminho_origem: int |
   None`, `troca_caminho_destino: int | None`, `troca_metodo: str | None`,
   `troca_confianca: float | None`, `reformulacao_variante: int | None`) a
   `log_turno()` em `app/observability/log.py` — todos com default `None`,
   sem mudança nos campos existentes
-- [ ] 5.1.2 Repassar os novos campos a partir de `app/api/webhook.py` para
+- [x] 5.1.2 Repassar os novos campos a partir de `app/api/webhook.py` para
   `log_turno()` nos pontos onde troca de caminho ou reformulação ocorreram
-- [ ] 5.1.3 Confirmar que nenhum campo novo carrega conteúdo bruto da
+  <!-- FlowResult (app/core/flow.py) ganhou os 5 campos aditivos,
+  atribuidos POS-HOC em FlowEngine.process() a partir de
+  _despachar_troca_caminho/_reformular_ou_handoff (mesmo padrao de
+  confianca_slot/fidelidade_fiel); webhook.py repassa via _turno_evt -->
+- [x] 5.1.3 Confirmar que nenhum campo novo carrega conteúdo bruto da
   mensagem do lead (SEC-LLM-1) — apenas metadados estruturados (números de
   caminho, método, confiança numérica, índice de variante)
-- [ ] 5.1.4 Confirmar que `_scrub`/`_mask_number`/`_emit` (já existentes)
+- [x] 5.1.4 Confirmar que `_scrub`/`_mask_number`/`_emit` (já existentes)
   cobrem o evento estendido sem qualquer mudança no pipeline de emissão
 
 ### 5.2 Testes de observabilidade `[M]`
@@ -376,12 +380,12 @@ Constitution Princípio VI (Isolamento e Segurança de Infraestrutura)
 Ref: quickstart.md Cenário 14; `sdr-turnos-obs/contracts/turno-event.md`
 (contrato original C-1..C-5, preservados)
 
-- [ ] 5.2.1 Estender `test_observability.py` com o shape estendido do
+- [x] 5.2.1 Estender `test_observability.py` com o shape estendido do
   evento (novos campos presentes conforme `contracts/turno-event-extensao.md`)
-- [ ] 5.2.2 Teste: evento continua emitido exatamente 1x por turno mesmo
+- [x] 5.2.2 Teste: evento continua emitido exatamente 1x por turno mesmo
   quando troca de caminho e/ou reformulação ocorrem no mesmo turno (C-1/C-2
   do contrato original preservados)
-- [ ] 5.2.3 Teste: os registros de troca de caminho e de reformulação são
+- [x] 5.2.3 Teste: os registros de troca de caminho e de reformulação são
   identificáveis nos registros de atendimento existentes, sem lacunas
   (SC-006)
 

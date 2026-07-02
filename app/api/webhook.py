@@ -577,6 +577,17 @@ async def _handle_engine(
             # Rastreabilidade aditiva (Onda 3, FASE 5 — US4/FR-018): ids dos
             # chunks recuperados (HybridRetriever) que embasaram a resposta.
             _turno_evt["fonte_ids"] = flow_result.fonte_ids
+            # Observabilidade aditiva (sdr-fluidez-intencao, FASE 5, US4 —
+            # FR-017/FR-018, contracts/turno-event-extensao.md): troca de
+            # caminho mid-jornada e reformulacao humanizada deste turno,
+            # quando acionadas. None quando o mecanismo correspondente nao
+            # rodou — log_turno OMITE o campo nesse caso (mesmo contrato
+            # aditivo dos campos acima, nunca quebra o schema das Ondas 1/2/3).
+            _turno_evt["troca_caminho_origem"] = flow_result.troca_caminho_origem
+            _turno_evt["troca_caminho_destino"] = flow_result.troca_caminho_destino
+            _turno_evt["troca_metodo"] = flow_result.troca_metodo
+            _turno_evt["troca_confianca"] = flow_result.troca_confianca
+            _turno_evt["reformulacao_variante"] = flow_result.reformulacao_variante
 
             # ---------------------------------------------------------------
             # 4. Persistir atualizacoes de estado
@@ -700,6 +711,11 @@ async def _handle_engine(
                         "fidelidade_afirmacoes_nao_sustentadas"
                     ),
                     fonte_ids=_turno_evt.get("fonte_ids"),
+                    troca_caminho_origem=_turno_evt.get("troca_caminho_origem"),
+                    troca_caminho_destino=_turno_evt.get("troca_caminho_destino"),
+                    troca_metodo=_turno_evt.get("troca_metodo"),
+                    troca_confianca=_turno_evt.get("troca_confianca"),
+                    reformulacao_variante=_turno_evt.get("reformulacao_variante"),
                 )
 
 

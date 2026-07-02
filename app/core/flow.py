@@ -1314,6 +1314,11 @@ class FlowResult:
         fidelidade_fiel: Optional[bool] = None,
         fidelidade_afirmacoes_nao_sustentadas: Optional[list] = None,
         fonte_ids: Optional[list] = None,
+        troca_caminho_origem: Optional[int] = None,
+        troca_caminho_destino: Optional[int] = None,
+        troca_metodo: Optional[str] = None,
+        troca_confianca: Optional[float] = None,
+        reformulacao_variante: Optional[int] = None,
     ):
         self.response_text = response_text
         self.action = action
@@ -1347,6 +1352,21 @@ class FlowResult:
         # `GroundedResponder.last_fonte_ids`. None quando RAG nao foi
         # acionado neste turno (fast-path/verbatim/sem duvida).
         self.fonte_ids = fonte_ids
+        # Observabilidade aditiva (FASE 5, US4 — FR-017/FR-018, contracts/
+        # turno-event-extensao.md): atribuidos POS-HOC por
+        # `FlowEngine.process()` (mesmo padrao de confianca_slot/
+        # fidelidade_fiel/fonte_ids acima) a partir do que
+        # `_despachar_troca_caminho`/`_reformular_ou_handoff` registraram
+        # neste turno. None quando o mecanismo correspondente nao foi
+        # acionado (turno sem troca de caminho / sem reformulacao).
+        # `troca_caminho_origem`/`troca_caminho_destino` sao SEMPRE
+        # preenchidos juntos (E-1); `troca_confianca` so e nao-nulo quando
+        # `troca_metodo="assistido"` (E-2).
+        self.troca_caminho_origem = troca_caminho_origem
+        self.troca_caminho_destino = troca_caminho_destino
+        self.troca_metodo = troca_metodo
+        self.troca_confianca = troca_confianca
+        self.reformulacao_variante = reformulacao_variante
 
 
 class FlowEngine:
@@ -1392,6 +1412,14 @@ class FlowEngine:
         # quando o `SlotExtractor` de fato roda (fast-path resolvido nao
         # define confianca — nao ha "confianca do fallback" a reportar).
         self._last_confianca_slot: Optional[float] = None
+        # Observabilidade aditiva (FASE 5, US4 — FR-017/FR-018): dados da
+        # ULTIMA troca de caminho e da ULTIMA reformulacao (variante ciclica)
+        # acionadas no turno corrente. Mesmo padrao de `_last_confianca_slot`:
+        # resetados a cada `process()`, setados por
+        # `_despachar_troca_caminho`/`_reformular_ou_handoff` somente quando
+        # de fato acionados.
+        self._last_troca_caminho: Optional[dict] = None
+        self._last_reformulacao_variante: Optional[int] = None
 
     async def process(
         self, ticket_id: int, user_message: str, context: SessionContext
@@ -1419,6 +1447,8 @@ class FlowEngine:
         # nunca vazar o veredito/confianca de um turno anterior quando o
         # mecanismo correspondente nao e acionado no turno corrente.
         self._last_confianca_slot = None
+        self._last_troca_caminho = None
+        self._last_reformulacao_variante = None
         if self._responder is not None:
             self._responder.last_fidelidade_fiel = None
             self._responder.last_fidelidade_afirmacoes_nao_sustentadas = None
@@ -1451,6 +1481,12 @@ class FlowEngine:
                 self._responder.last_fidelidade_afirmacoes_nao_sustentadas
             )
             result.fonte_ids = self._responder.last_fonte_ids
+        if self._last_troca_caminho is not None:
+            result.troca_caminho_origem = self._last_troca_caminho["origem"]
+            result.troca_caminho_destino = self._last_troca_caminho["destino"]
+            result.troca_metodo = self._last_troca_caminho["metodo"]
+            result.troca_confianca = self._last_troca_caminho["confianca"]
+        result.reformulacao_variante = self._last_reformulacao_variante
         return result
 
     # ------------------------------------------------------------------
@@ -1952,6 +1988,12 @@ class FlowEngine:
         pool = _REFORMULACOES.get(context.idioma, _REFORMULACOES["pt"])
         variante_idx = (n - 1) % len(pool)
         texto = pool[variante_idx] + curta
+        # Observabilidade aditiva (FASE 5, US4 — FR-018, E-3): registra o
+        # indice da variante para o `process()` anexar ao FlowResult final
+        # POS-HOC (mesmo padrao de `_last_confianca_slot`/`_last_troca_
+        # caminho`). So atribuido neste ramo (reformulacao de fato emitida) —
+        # nunca no ramo de troca detectada nem no de handoff por limite.
+        self._last_reformulacao_variante = variante_idx
         return FlowResult(texto, "continue", caminho, etapa, updates)
 
     # ------------------------------------------------------------------
@@ -2100,6 +2142,15 @@ class FlowEngine:
             "flow: troca de caminho mid-jornada origem=%s destino=%s metodo=%s ticket_id=%s",
             origem, destino, metodo, context.ticket_id,
         )
+        # Observabilidade aditiva (FASE 5, US4 — FR-017): registra a troca
+        # para o `process()` anexar ao FlowResult final POS-HOC (mesmo
+        # padrao de `_last_confianca_slot`). E-1 (turno-event-extensao.md):
+        # origem/destino sempre juntos; E-2: confianca so nao-nula quando
+        # metodo="assistido" — ja garantido por `_detectar_troca_caminho`.
+        self._last_troca_caminho = {
+            "origem": origem, "destino": destino, "metodo": metodo,
+            "confianca": confianca,
+        }
         context.caminho = destino
         context.etapa = None
         _tent_clear(context, updates)

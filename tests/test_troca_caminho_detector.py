@@ -76,6 +76,14 @@ async def test_marcador_explicito_despacha_direto_sem_pergunta_intermediaria():
     # FR-007: tentativas da etapa abandonada zeradas.
     assert ctx.etapa_funil is None
     assert _tent_count(ctx, ETAPA_QUALIF_ESPECIALIDADE) == 0
+    # FASE 5 (US4/FR-017): FlowResult carrega origem/destino/metodo da troca
+    # para observabilidade aditiva (log_turno.troca_caminho_*). E-1: origem
+    # e destino sempre juntos; E-2: confianca None no caminho deterministico.
+    assert r.troca_caminho_origem == int(CaminhoMapaMestre.CURSOS_PRESENCIAIS)
+    assert r.troca_caminho_destino == int(CaminhoMapaMestre.CURSO_ONLINE_HG)
+    assert r.troca_metodo == "deterministico"
+    assert r.troca_confianca is None
+    assert r.reformulacao_variante is None  # troca detectada, nao reformulacao
 
 
 @pytest.mark.asyncio

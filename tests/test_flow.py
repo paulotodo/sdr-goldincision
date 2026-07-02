@@ -641,6 +641,10 @@ async def test_robustez_reformula_depois_handoff():
     assert r1.action == "continue"
     assert r1.etapa == ETAPA_QUALIF_MEDICO
     assert r1.response_text.startswith(_REFORMULACOES["pt"][0])
+    # FASE 5 (US4/FR-018): FlowResult carrega o indice da variante usada
+    # para observabilidade aditiva (log_turno.reformulacao_variante).
+    assert r1.reformulacao_variante == 0
+    assert r1.troca_caminho_origem is None  # nao houve troca neste turno
     ctx.etapa_funil = r1.updates.get("etapa_funil")
 
     # 2a → reformula com a variante 2 (variante_idx = (2 - 1) % len(pool) = 1)
@@ -649,11 +653,14 @@ async def test_robustez_reformula_depois_handoff():
     assert r2.action == "continue"
     assert r2.response_text.startswith(_REFORMULACOES["pt"][1])
     assert r2.response_text != r1.response_text
+    assert r2.reformulacao_variante == 1
     ctx.etapa_funil = r2.updates.get("etapa_funil")
 
     # 3a → handoff (nao repete infinitamente)
     r3 = await eng.process(1, "????", ctx)
     assert r3.action == "handoff"
+    # Handoff por limite de tentativas nao e uma reformulacao — None.
+    assert r3.reformulacao_variante is None
 
 
 # ===========================================================================

@@ -101,6 +101,22 @@ class SessionContext:
     # descartar o restante e cair em abstencao/handoff. Transiente/fail-open.
     overflow_blocos: list[str] = field(default_factory=list)
     overflow_idioma: Optional[str] = None
+    # Correcao de rumo mid-jornada (US1, FASE 2, FR-008/012, task 2.1.2):
+    # estado de confirmacao/desambiguacao de troca de caminho pendente,
+    # setado pelo detector centralizado em `_reformular_ou_handoff`
+    # (app/core/flow.py) quando a intencao de troca e clara mas sem
+    # marcador explicito (tipo="confirmacao", 1 destino) ou ambigua entre
+    # EXATAMENTE 2 caminhos (tipo="desambiguacao", 2 destinos). Consumido
+    # no INICIO de `_process_core`, antes do resolver do no (P-2): a
+    # mensagem corrente e interpretada EXCLUSIVAMENTE como resposta a esta
+    # pendencia. Bufferizado em Redis (hash estado:{chamadoId}, campo
+    # troca_pendente) pelo CALLER (webhook.py), mesmo padrao fail-open de
+    # overflow_blocos/overflow_idioma. Schema
+    # (contracts/estado-troca-pendente.md): {"destinos": [int, ...],
+    # "origem": int, "metodo": "deterministico"|"assistido",
+    # "confianca": float|None, "tipo": "confirmacao"|"desambiguacao"}.
+    # Transiente: nunca persistido em Postgres.
+    troca_caminho_pendente: Optional[dict] = None
 
 
 class MemoryManager:

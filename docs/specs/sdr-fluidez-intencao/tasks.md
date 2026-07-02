@@ -139,19 +139,19 @@ Premium)
 Ref: contracts/estado-troca-pendente.md, data-model.md §Estado de
 Confirmação/Desambiguação Pendente; research.md Decision 6
 
-- [ ] 2.1.1 Adicionar `TROCA_PENDENTE_FIELD` em `app/core/redis_keys.py`
+- [x] 2.1.1 Adicionar `TROCA_PENDENTE_FIELD` em `app/core/redis_keys.py`
   (hash `estado:{chamadoId}`, mesmo padrão de `OVERFLOW_BLOCOS_FIELD`/
   `OVERFLOW_IDIOMA_FIELD`)
-- [ ] 2.1.2 Adicionar `SessionContext.troca_caminho_pendente: Optional[dict]
+- [x] 2.1.2 Adicionar `SessionContext.troca_caminho_pendente: Optional[dict]
   = None` em `app/core/memory.py` (mesmo padrão de `overflow_blocos`/
   `overflow_idioma`)
-- [ ] 2.1.3 Implementar leitura fail-open (P-4): `HGET` ausente ou JSON
+- [x] 2.1.3 Implementar leitura fail-open (P-4): `HGET` ausente ou JSON
   corrompido é tratado como "sem pergunta pendente" — nunca bloqueia o
   atendimento
-- [ ] 2.1.4 Implementar limpeza explícita (`HDEL`) tanto no caminho de
+- [x] 2.1.4 Implementar limpeza explícita (`HDEL`) tanto no caminho de
   sucesso (confirmação/escolha reconhecida) quanto no de falha
   (negação/não-reconhecimento) — P-3, nunca fica "pendurado"
-- [ ] 2.1.5 Testes de escrita/leitura/limpeza do campo cobrindo os 2 tipos
+- [x] 2.1.5 Testes de escrita/leitura/limpeza do campo cobrindo os 2 tipos
   (`confirmacao` com 1 destino, `desambiguacao` com exatamente 2 destinos)
 
 ### 2.2 Detector centralizado em `_reformular_ou_handoff` `[C]`

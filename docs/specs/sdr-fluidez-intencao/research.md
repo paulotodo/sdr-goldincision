@@ -238,6 +238,33 @@ ciclo determinístico testável no golden set.
 - Selecionar variante aleatoriamente → clarify Q4 exigiu explicitamente
   ciclo determinístico e reprodutível/testável, não seleção aleatória.
 
+### Auditoria consolidada CHK003 (FASE 4, task 4.2.8 — fecha o gap de checklist)
+
+Levantamento empírico dos 10 call sites de `_reformular_ou_handoff` em
+`app/core/flow.py` (execute-task, onda-009):
+
+| Call site (etapa) | `pergunta` passada | Classificação | Ação |
+|---|---|---|---|
+| `ETAPA_SISTEMA_OBJETIVO` | `_t("sistema_etapa1_2", idioma)` | **NÃO bare** — saudação "Perfeito! 😊" + explicação longa dos 2 programas embutidas | `pergunta_curta` dedicada criada: `sistema_etapa1_2_curta` (task 4.2.1, causa raiz confirmada) |
+| `ETAPA_ALUNO_MENU` | `_t("aluno_menu", idioma)` | **NÃO bare** — saudação "Perfeito! Ficarei feliz..." + submenu embutidos (mesmo padrão estrutural) | `pergunta_curta` dedicada criada: `aluno_menu_curta` (task 4.2.2, achado novo) |
+| `ETAPA_FECHAMENTO` | `_t("fechar_link", idioma)` | Bare (pergunta única, sem intro) | Sem mudança (task 4.2.3) |
+| `ETAPA_SISTEMA_LICENCIAMENTO` | `_gerar_pergunta_medico(idioma, cam)` | Bare (`qualif_medico_lic`) | Sem mudança (task 4.2.4) |
+| `ETAPA_LINK` | `_gerar_pergunta_medico(idioma, cam)` | Bare (`qualif_medico_c1/c2/lic`/`pergunta_medico`) | Sem mudança (task 4.2.4) |
+| `ETAPA_QUALIF_MEDICO` (1º site) | `_gerar_pergunta_medico(idioma, cam)` | Bare | Sem mudança (task 4.2.4) |
+| `ETAPA_QUALIF_MEDICO` (2º site) | `_gerar_pergunta_medico(idioma, cam)` | Bare | Sem mudança (task 4.2.4) |
+| `ETAPA_QUALIF_EXPERIENCIA` | `_gerar_pergunta_experiencia(idioma)` | Bare (`pergunta_experiencia`) | Sem mudança (task 4.2.5) |
+| `ETAPA_QUALIF_ESPECIALIDADE` | `_gerar_pergunta_especialidade(idioma)` | Bare (`pergunta_especialidade`) | Sem mudança (task 4.2.6) |
+| `ETAPA_ESCOLHA_TURMA` | `_gerar_pergunta_escolha_turma(idioma)` | Bare (`pergunta_turma`) | Sem mudança (task 4.2.7) |
+
+**Conclusão**: 2 de 10 call sites (20%) reusavam bloco de entrada com
+saudação/explicação embutida (causa raiz de FR-014); ambos corrigidos com
+`pergunta_curta` dedicada. Os demais 8 (80%) já eram bare por construção —
+confirmado por leitura direta dos blocos i18n correspondentes, sem
+necessidade de código novo (apenas comentários inline de auditoria em
+`app/core/flow.py`, ver `_gerar_pergunta_medico`/`_experiencia`/
+`_especialidade`/`_escolha_turma` e o call site de `fechar_link`). CHK003
+fechado.
+
 ## Decision 8: Observabilidade aditiva — estender `log_turno`, não criar novo evento
 
 **Decision**: Adicionar campos **opcionais** a `log_turno()`

@@ -626,19 +626,29 @@ async def test_c6_outro_assunto_handoff():
 
 @pytest.mark.asyncio
 async def test_robustez_reformula_depois_handoff():
+    """FASE 4 (task 4.1.3, FR-014, research.md Decision 7 — causa raiz):
+    a 1a reformulacao (n=1) NUNCA reenvia o bloco de entrada verbatim —
+    ja usa a variante ciclica 1 de `_REFORMULACOES` + pergunta bare. A 2a
+    (n=2) usa a variante ciclica 2 (nunca repete a variante do turno
+    imediatamente anterior, dec-011/012). A 3a esgota `_MAX_TENTATIVAS` e
+    encaminha a humano (comportamento/limite preservados, FR-016)."""
     eng = engine(ClassificacaoIntencao.CURSOS_PRESENCIAIS)
     ctx = make_context(caminho=2, etapa=ETAPA_QUALIF_MEDICO)
 
-    # 1a resposta nao reconhecida → re-pergunta (tentativa 1)
+    # 1a resposta nao reconhecida → reformula com a variante 1 do ciclo
+    # (variante_idx = (1 - 1) % len(pool) = 0)
     r1 = await eng.process(1, "xpto blá", ctx)
     assert r1.action == "continue"
     assert r1.etapa == ETAPA_QUALIF_MEDICO
+    assert r1.response_text.startswith(_REFORMULACOES["pt"][0])
     ctx.etapa_funil = r1.updates.get("etapa_funil")
 
-    # 2a → reformula (prefixo "não entendi")
+    # 2a → reformula com a variante 2 (variante_idx = (2 - 1) % len(pool) = 1)
+    # — diferente da variante do turno anterior (r1)
     r2 = await eng.process(1, "zzz", ctx)
     assert r2.action == "continue"
-    assert "não entendi" in r2.response_text.lower()
+    assert r2.response_text.startswith(_REFORMULACOES["pt"][1])
+    assert r2.response_text != r1.response_text
     ctx.etapa_funil = r2.updates.get("etapa_funil")
 
     # 3a → handoff (nao repete infinitamente)
@@ -1740,3 +1750,155 @@ def test_reformulacoes_termina_com_espaco_para_concatenar_pergunta_curta():
                 f"variante {variante!r} ({idioma}) nao termina com espaco "
                 "unico para concatenacao com pergunta_curta"
             )
+
+
+# ===========================================================================
+# FASE 4 — US3: Reformulação Humanizada (P2)
+# ===========================================================================
+
+
+def test_variante_idx_ciclo_sequencial_deterministico_nunca_repete_anterior():
+    """Task 4.1.4/FR-015: `variante_idx = (n - 1) % len(pool)` e
+    deterministico (mesma entrada -> mesma saida, testavel byte-a-byte) e,
+    por construcao, a variante escolhida em cada tentativa `n` nunca repete
+    a do turno `n - 1` imediatamente anterior — verificado para os 3
+    idiomas suportados, cada um com pool de 2-3 variantes (dec-011/012)."""
+    for idioma, pool in _REFORMULACOES.items():
+        tamanho = len(pool)
+        indices = [(n - 1) % tamanho for n in range(1, 20)]
+        # Deterministico: recalcular a partir da mesma entrada reproduz
+        # exatamente a mesma sequencia de indices.
+        assert indices == [(n - 1) % tamanho for n in range(1, 20)]
+        # Nunca repete o indice (logo, a variante) do turno imediatamente
+        # anterior.
+        for i in range(1, len(indices)):
+            assert indices[i] != indices[i - 1], (
+                f"idioma {idioma}: variante_idx repetiu a do turno anterior "
+                f"em n={i + 1}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_sistema_etapa1_2_reformulacao_nao_repete_saudacao_nem_explicacao():
+    """Task 4.2.1/FR-014, quickstart Cenário 7 (regressão direta da causa
+    raiz confirmada em research.md Decision 7): a 1a mensagem não
+    reconhecida em `ETAPA_SISTEMA_OBJETIVO` NUNCA reenvia o bloco de
+    entrada verbatim (saudação "Perfeito! 😊" + explicação longa dos 2
+    programas) — usa `pergunta_curta` dedicada (`sistema_etapa1_2_curta`)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    entrada = _t("sistema_etapa1_2", "pt")
+    r1 = await eng.process(1, "xpto blá", ctx)
+
+    assert r1.etapa == ETAPA_SISTEMA_OBJETIVO
+    assert r1.response_text != entrada
+    assert "Perfeito! 😊" not in r1.response_text
+    assert "curso avulso" not in r1.response_text  # explicação longa NÃO repetida
+    assert "Qual destas opções representa melhor o seu objetivo?" in r1.response_text
+    assert r1.response_text.startswith(_REFORMULACOES["pt"][0])
+
+
+@pytest.mark.asyncio
+async def test_aluno_menu_reformulacao_nao_repete_saudacao():
+    """Task 4.2.2/FR-014 (achado NOVO, mesmo padrão estrutural de
+    `sistema_etapa1_2`): a 1a mensagem não reconhecida em
+    `ETAPA_ALUNO_MENU` NUNCA reenvia o bloco de entrada verbatim (saudação
+    "Perfeito! Ficarei feliz...") — usa `pergunta_curta` dedicada
+    (`aluno_menu_curta`)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=4, etapa=ETAPA_ALUNO_MENU)
+
+    entrada = _t("aluno_menu", "pt")
+    r1 = await eng.process(1, "hmmmm não entendi bem as opções", ctx)
+
+    assert r1.etapa == ETAPA_ALUNO_MENU
+    assert r1.response_text != entrada
+    assert "Ficarei feliz em direcionar" not in r1.response_text
+    assert "Certificado de conclusão" in r1.response_text  # submenu preservado
+    assert r1.response_text.startswith(_REFORMULACOES["pt"][0])
+
+
+@pytest.mark.asyncio
+async def test_fechar_link_reformulacao_bare_aplica_ciclo_sem_quebrar():
+    """Task 4.2.3, quickstart Cenário 7 (call site já bare — apenas
+    confirma que o ciclo de 4.1 se aplica sem quebrar o texto)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=1, etapa=ETAPA_FECHAMENTO)
+
+    entrada = _t("fechar_link", "pt")
+    r1 = await eng.process(1, "xpto blá", ctx)
+
+    assert r1.etapa == ETAPA_FECHAMENTO
+    assert r1.response_text != entrada
+    assert r1.response_text.startswith(_REFORMULACOES["pt"][0])
+    assert entrada in r1.response_text  # pergunta bare preservada ao final
+
+
+@pytest.mark.asyncio
+async def test_reformulacao_segunda_tentativa_difere_da_primeira_mesmo_idioma():
+    """Task 4.3.2, quickstart Cenário 7/FR-014/SC-004: a 2a mensagem não
+    reconhecida para a mesma pergunta gera resposta textualmente diferente
+    da 1a, no mesmo idioma, sem repetir a introdução/saudação do bloco
+    original."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    r1 = await eng.process(1, "xpto blá", ctx)
+    ctx.etapa_funil = r1.updates.get("etapa_funil")
+    r2 = await eng.process(1, "zzz", ctx)
+
+    assert r1.response_text != r2.response_text
+    assert "Perfeito! 😊" not in r2.response_text
+    assert r2.response_text.startswith(_REFORMULACOES["pt"][1])
+
+
+@pytest.mark.asyncio
+async def test_reformulacao_limite_tentativas_e_handoff_preservados_c3():
+    """Task 4.3.3, quickstart Cenário 8/FR-016 (regressão): o limite de
+    tentativas (`_MAX_TENTATIVAS=3`) e o encaminhamento automático a
+    humano permanecem com o mesmo escopo/limite vigente, também para o
+    call site corrigido de `ETAPA_SISTEMA_OBJETIVO`."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    r1 = await eng.process(1, "xpto blá", ctx)
+    assert r1.action == "continue"
+    ctx.etapa_funil = r1.updates.get("etapa_funil")
+
+    r2 = await eng.process(1, "zzz", ctx)
+    assert r2.action == "continue"
+    ctx.etapa_funil = r2.updates.get("etapa_funil")
+
+    r3 = await eng.process(1, "????", ctx)
+    assert r3.action == "handoff"
+
+
+@pytest.mark.asyncio
+async def test_cenario_real_harmonizacao_glutea_nao_reconhecida_depois_corrige_sistema():
+    """Task 4.3.1, fecha CHK022/SC-001 (complementa o caso dedicado do
+    golden set, `tests/golden/casos/reformulacao_humanizada.json`):
+    reproduz LITERALMENTE o cenário real relatado na spec (§Contexto e
+    motivação) — "harmonização glutea" não reconhecida no menu inicial em
+    texto livre, seguido de "opa... na verdade quero o curso de
+    harmoização glutea" (com erro de digitação) dentro do caminho Sistema
+    GoldIncision (Caminho 3)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    # "harmonização glutea" não é um objetivo reconhecível em
+    # ETAPA_SISTEMA_OBJETIVO (menu de 3 opções sobre Licenciamento/
+    # Franquia/incerteza) -- reformula sem repetir a saudação/explicação.
+    r1 = await eng.process(1, "harmonização glutea", ctx)
+    assert r1.etapa == ETAPA_SISTEMA_OBJETIVO
+    assert "Perfeito! 😊" not in r1.response_text
+    ctx.etapa_funil = r1.updates.get("etapa_funil")
+
+    # Correção com erro de digitação ("harmoização") mencionando "curso" —
+    # o detector de troca de caminho (US1) reconhece Caminho 1/2 (curso).
+    r2 = await eng.process(
+        1, "opa... na verdade quero o curso de harmoização glutea", ctx,
+    )
+    assert r2.caminho in (
+        CaminhoMapaMestre.CURSO_ONLINE_HG, CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+    )

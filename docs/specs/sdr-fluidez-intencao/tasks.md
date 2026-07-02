@@ -271,19 +271,19 @@ Ref: quickstart.md Cenários 5 e 6
 Ref: research.md Decision 7 (causa raiz + fix), Spec FR-014/FR-015,
 dec-011/dec-012 (clarify Q4 — ciclo sequencial determinístico)
 
-- [ ] 4.1.1 Criar `_REFORMULACOES: dict[str, list[str]]` (pool i18n, conteúdo
+- [x] 4.1.1 Criar `_REFORMULACOES: dict[str, list[str]]` (pool i18n, conteúdo
   de 1.3.3) — bloco distinto de `_ACKS` (aberturas de confirmação) e do
   atual único prefixo `"nao_entendi"`
-- [ ] 4.1.2 Implementar seleção `variante_idx = (n - 1) % len(pool)` em
+- [x] 4.1.2 Implementar seleção `variante_idx = (n - 1) % len(pool)` em
   `_reformular_ou_handoff` — ciclo sequencial determinístico pelo número da
   tentativa (garante por construção que a variante do turno imediatamente
   anterior nunca se repete, FR-015)
-- [ ] 4.1.3 Implementar composição final `_REFORMULACOES[idioma][variante_idx]
+- [x] 4.1.3 Implementar composição final `_REFORMULACOES[idioma][variante_idx]
   + pergunta_curta` — substitui o reenvio verbatim atual de `pergunta` em
   `n == 1` (causa raiz: hoje `_reformular_ou_handoff` só prefixa a partir da
   SEGUNDA tentativa, `n >= 2`, `app/core/flow.py:1463-1466`; a primeira
   reformulação reenviava o bloco completo sem qualquer alteração)
-- [ ] 4.1.4 Teste de unidade: `variante_idx` é reprodutível/determinístico e,
+- [x] 4.1.4 Teste de unidade: `variante_idx` é reprodutível/determinístico e,
   por construção, nunca repete a variante do turno imediatamente anterior
   (FR-015, testável byte-a-byte no golden set)
 
@@ -296,14 +296,14 @@ como `pergunta` (candidatos a conter saudação/conteúdo de entrada
 embutidos) e **7** passam o retorno de um gerador dinâmico `_gerar_pergunta_*`
 (candidatos a já serem "bare").
 
-- [ ] 4.2.1 Linha 1692 (`ETAPA_SISTEMA_OBJETIVO`, `_t("sistema_etapa1_2",
+- [x] 4.2.1 Linha 1692 (`ETAPA_SISTEMA_OBJETIVO`, `_t("sistema_etapa1_2",
   idioma)`) — **CONFIRMADO causa raiz** (research.md Decision 7): bloco
   (`app/core/flow.py:354-...`) inicia com a saudação `"Perfeito! 😊\n\n"` +
   explicação longa dos 2 programas, reusado goela-abaixo como bloco de
   entrada (`app/core/flow.py:1826-1830`) E como pergunta de reformulação.
   Extrair uma `pergunta_curta` dedicada (sem a saudação/explicação) para uso
   exclusivo em `_reformular_ou_handoff`
-- [ ] 4.2.2 Linha 1641/1660 (`ETAPA_ALUNO_MENU`, `_t("aluno_menu", idioma)`)
+- [x] 4.2.2 Linha 1641/1660 (`ETAPA_ALUNO_MENU`, `_t("aluno_menu", idioma)`)
   — **achado NOVO desta auditoria** (mesmo padrão estrutural de
   `sistema_etapa1_2`): o bloco (`app/core/flow.py:543-558`) inicia com
   `"Perfeito! Ficarei feliz em direcionar o seu atendimento. 😊\n"` seguido
@@ -311,22 +311,22 @@ embutidos) e **7** passam o retorno de um gerador dinâmico `_gerar_pergunta_*`
   (`app/core/flow.py:~1660`) quanto na reformulação (linha 1641). Requer a
   MESMA correção de 4.2.1: extrair `pergunta_curta` dedicada (o submenu sem
   a saudação)
-- [ ] 4.2.3 Linha 1877 (`ETAPA_FECHAMENTO`, `_t("fechar_link", idioma)`) —
+- [x] 4.2.3 Linha 1877 (`ETAPA_FECHAMENTO`, `_t("fechar_link", idioma)`) —
   auditado: bloco (`app/core/flow.py:263-266`) já é bare — uma única
   pergunta curta ("Gostaria de receber o link...?"), sem saudação/introdução
   embutida. NÃO requer correção de conteúdo; apenas confirmar via teste de
   regressão que a reformulação cíclica (4.1) se aplica sem quebrar o texto
-- [ ] 4.2.4 Linhas 1737/1885/1904/2059 (`_gerar_pergunta_medico`) — auditar
+- [x] 4.2.4 Linhas 1737/1885/1904/2059 (`_gerar_pergunta_medico`) — auditar
   o corpo da função geradora e confirmar que produz texto bare (sem saudação
   embutida); se confirmado, documentar a decisão inline (comentário
   referenciando esta tarefa) — sem código novo além da integração com 4.1
-- [ ] 4.2.5 Linha 2071 (`_gerar_pergunta_experiencia`) — mesma auditoria de
+- [x] 4.2.5 Linha 2071 (`_gerar_pergunta_experiencia`) — mesma auditoria de
   4.2.4
-- [ ] 4.2.6 Linha 2083 (`_gerar_pergunta_especialidade`) — mesma auditoria
+- [x] 4.2.6 Linha 2083 (`_gerar_pergunta_especialidade`) — mesma auditoria
   de 4.2.4
-- [ ] 4.2.7 Linha 2095 (`_gerar_pergunta_escolha_turma`) — mesma auditoria
+- [x] 4.2.7 Linha 2095 (`_gerar_pergunta_escolha_turma`) — mesma auditoria
   de 4.2.4
-- [ ] 4.2.8 Consolidar o resultado da auditoria dos 10 call sites (quais
+- [x] 4.2.8 Consolidar o resultado da auditoria dos 10 call sites (quais
   precisaram de `pergunta_curta` dedicada vs. já eram bare) em comentário no
   código ou nota em `research.md`, fechando definitivamente CHK003
 
@@ -335,17 +335,17 @@ embutidos) e **7** passam o retorno de um gerador dinâmico `_gerar_pergunta_*`
 Ref: quickstart.md Cenário 7 e 8; Spec FR-014/FR-016; SC-001, SC-004;
 checklists/requirements.md CHK022
 
-- [ ] 4.3.1 Fechar gap de checklist CHK022 (SC-001): adicionar caso de
+- [x] 4.3.1 Fechar gap de checklist CHK022 (SC-001): adicionar caso de
   golden set que reproduz LITERALMENTE o cenário real relatado na spec
   (§Contexto e motivação — "harmonização glutea" não reconhecida no menu,
   depois "opa... na verdade quero o curso de harmoização glutea" dentro do
   caminho Sistema GoldIncision), além dos casos genéricos já previstos no
   Cenário 1 do quickstart
-- [ ] 4.3.2 Teste: a segunda mensagem não reconhecida para a mesma pergunta
+- [x] 4.3.2 Teste: a segunda mensagem não reconhecida para a mesma pergunta
   gera resposta textualmente diferente da primeira, no mesmo idioma, sem
   repetir a introdução/saudação do bloco original (FR-014, SC-004, quickstart
   Cenário 7)
-- [ ] 4.3.3 Teste de regressão: limite de tentativas (`_MAX_TENTATIVAS=3`,
+- [x] 4.3.3 Teste de regressão: limite de tentativas (`_MAX_TENTATIVAS=3`,
   `app/core/flow.py:1456`) e encaminhamento automático a humano preservados
   com o mesmo escopo/limite vigente (FR-016, quickstart Cenário 8)
 

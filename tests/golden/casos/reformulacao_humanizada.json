@@ -1,0 +1,47 @@
+{
+  "casos": [
+    {
+      "id": "reformulacao_sistema_etapa1_2_nao_repete_saudacao_nem_explicacao",
+      "dimensao": "reformulacao",
+      "mensagem": "xpto blá",
+      "estado_inicial": {"caminho": 3, "etapa": "sistema_objetivo"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "sistema_objetivo",
+        "caminho": 3,
+        "contains": ["Qual destas opções representa melhor o seu objetivo?"],
+        "not_contains": ["Perfeito! 😊", "curso avulso"]
+      }
+    },
+    {
+      "id": "reformulacao_aluno_menu_nao_repete_saudacao",
+      "dimensao": "reformulacao",
+      "mensagem": "hmmmm não entendi bem as opções",
+      "estado_inicial": {"caminho": 4, "etapa": "aluno_menu"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "aluno_menu",
+        "caminho": 4,
+        "contains": ["Certificado de conclusão"],
+        "not_contains": ["Ficarei feliz em direcionar"]
+      }
+    },
+    {
+      "id": "reformulacao_cenario_real_harmonizacao_glutea_corrige_para_sistema",
+      "dimensao": "reformulacao",
+      "mensagem": "opa... na verdade quero o curso de harmoização glutea",
+      "estado_inicial": {
+        "caminho": 3, "etapa": "sistema_objetivo",
+        "etapa_funil": "{\"et\": \"sistema_objetivo\", \"n\": 1}"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "etapa": "qualif_medico",
+        "caminho": 1
+      }
+    }
+  ]
+}

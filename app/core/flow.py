@@ -660,6 +660,33 @@ _T: dict[str, dict[str, str]] = {
             "sentido para mí."
         ),
     },
+    # Versao BARE de "sistema_etapa1_2" (FASE 4, task 4.2.1, CHK003,
+    # research.md Decision 7 -- causa raiz CONFIRMADA): apenas a pergunta de
+    # objetivo + as 3 opcoes, SEM a saudacao "Perfeito! 😊" nem a explicacao
+    # longa dos 2 programas. Uso EXCLUSIVO em `_reformular_ou_handoff`
+    # (`pergunta_curta`) -- nunca no despacho inicial da etapa.
+    "sistema_etapa1_2_curta": {
+        "pt": (
+            "Qual destas opções representa melhor o seu objetivo?\n"
+            "1️⃣ Incorporar a técnica GoldIncision à minha clínica atual.\n"
+            "2️⃣ Abrir uma Clínica GoldIncision completa.\n"
+            "3️⃣ Ainda não tenho certeza e gostaria de entender qual modelo faz mais "
+            "sentido para mim."
+        ),
+        "en": (
+            "Which of these options best represents your goal?\n"
+            "1️⃣ Incorporate the GoldIncision technique into my current clinic.\n"
+            "2️⃣ Open a complete GoldIncision Clinic.\n"
+            "3️⃣ I'm not sure yet and would like to understand which model fits me best."
+        ),
+        "es": (
+            "¿Cuál de estas opciones representa mejor tu objetivo?\n"
+            "1️⃣ Incorporar la técnica GoldIncision a mi clínica actual.\n"
+            "2️⃣ Abrir una Clínica GoldIncision completa.\n"
+            "3️⃣ Aún no estoy seguro y me gustaría entender qué modelo tiene más "
+            "sentido para mí."
+        ),
+    },
     "sistema_lic_naomedico": {
         "pt": (
             "Obrigado por compartilhar! No momento, o Licenciamento GoldIncision é "
@@ -823,6 +850,43 @@ _T: dict[str, dict[str, str]] = {
         ),
         "es": (
             "¡Perfecto! Estaré encantado de dirigir tu atención. 😊\n"
+            "Para que nuestro equipo pueda ayudarte con más agilidad, ¿cuál de estos "
+            "asuntos representa mejor tu necesidad?\n"
+            "1️⃣ Plataforma y acceso al curso\n"
+            "2️⃣ Certificado de finalización\n"
+            "3️⃣ Grupo de soporte técnico\n"
+            "4️⃣ Pago o inscripción\n"
+            "5️⃣ Dudas sobre el curso\n"
+            "6️⃣ Otro asunto"
+        ),
+    },
+    # Versao BARE de "aluno_menu" (FASE 4, task 4.2.2, CHK003 -- achado NOVO,
+    # MESMO padrao estrutural de "sistema_etapa1_2"): apenas o submenu de 6
+    # opcoes, SEM a saudacao "Perfeito! Ficarei feliz...". Uso EXCLUSIVO em
+    # `_reformular_ou_handoff` (`pergunta_curta`) -- nunca no despacho
+    # inicial da etapa.
+    "aluno_menu_curta": {
+        "pt": (
+            "Para que nossa equipe possa ajudá-lo com mais agilidade, qual destes "
+            "assuntos melhor representa sua necessidade?\n"
+            "1️⃣ Plataforma e acesso ao curso\n"
+            "2️⃣ Certificado de conclusão\n"
+            "3️⃣ Grupo de suporte técnico\n"
+            "4️⃣ Pagamento ou inscrição\n"
+            "5️⃣ Dúvidas sobre o curso\n"
+            "6️⃣ Outro assunto"
+        ),
+        "en": (
+            "So our team can help you faster, which of these best represents your "
+            "need?\n"
+            "1️⃣ Platform and course access\n"
+            "2️⃣ Completion certificate\n"
+            "3️⃣ Technical support group\n"
+            "4️⃣ Payment or registration\n"
+            "5️⃣ Questions about the course\n"
+            "6️⃣ Other subject"
+        ),
+        "es": (
             "Para que nuestro equipo pueda ayudarte con más agilidad, ¿cuál de estos "
             "asuntos representa mejor tu necesidad?\n"
             "1️⃣ Plataforma y acceso al curso\n"
@@ -1840,6 +1904,7 @@ class FlowEngine:
     async def _reformular_ou_handoff(
         self, context: SessionContext, updates: dict, caminho: int,
         etapa: str, pergunta: str, user_message: str,
+        pergunta_curta: Optional[str] = None,
     ) -> FlowResult:
         """
         Resposta nao reconhecida na etapa: primeiro tenta o detector
@@ -1850,6 +1915,19 @@ class FlowEngine:
         comportamento ja existente: incrementa tentativas. Apos N
         tentativas, encaminha a humano em vez de repetir a pergunta para
         sempre (robustez, #8).
+
+        `pergunta_curta` (FASE 4, task 4.1.3, research.md Decision 7,
+        FR-014/FR-015): versao BARE da pergunta pendente, sem a
+        saudacao/introducao/explicacao do bloco de entrada do no -- usada em
+        TODAS as reformulacoes, inclusive na PRIMEIRA tentativa (n == 1;
+        causa raiz confirmada: antes desta task, `texto = pergunta`
+        reenviava o bloco de entrada completo verbatim quando n == 1). Se
+        omitido, usa `pergunta` como `pergunta_curta` -- seguro apenas para
+        call sites cuja `pergunta` ja e bare (auditoria CHK003, task 4.2:
+        `fechar_link` e os 4 `_gerar_pergunta_*`). Call sites cuja
+        `pergunta` reusa um bloco de entrada com saudacao/explicacao
+        embutida (achados: `sistema_etapa1_2` [task 4.2.1], `aluno_menu`
+        [task 4.2.2]) DEVEM fornecer `pergunta_curta` explicitamente.
         """
         resultado_troca = await self._processar_deteccao_troca(
             context, updates, caminho, user_message,
@@ -1864,10 +1942,16 @@ class FlowEngine:
                 destino=DEST_CONSULTORES, motivo=f"nao_reconhecido:{etapa}",
             )
         updates["etapa_mapa_mestre"] = etapa
-        texto = pergunta
-        if n >= 2:
-            # Reformula: prefixa um reconhecimento + repete a pergunta com clareza.
-            texto = _t("nao_entendi", context.idioma) + pergunta
+        # Ciclo sequencial deterministico (FASE 4, task 4.1.2, FR-015,
+        # dec-011/dec-012): variante_idx = (n - 1) % len(pool) -- pelo
+        # numero da tentativa, garante por construcao que a variante do
+        # turno IMEDIATAMENTE ANTERIOR nunca se repete. Composicao final
+        # (task 4.1.3, FR-014): SEMPRE variante ciclica + pergunta_curta --
+        # nunca reenvia o bloco de entrada verbatim, nem na 1a tentativa.
+        curta = pergunta_curta if pergunta_curta is not None else pergunta
+        pool = _REFORMULACOES.get(context.idioma, _REFORMULACOES["pt"])
+        variante_idx = (n - 1) % len(pool)
+        texto = pool[variante_idx] + curta
         return FlowResult(texto, "continue", caminho, etapa, updates)
 
     # ------------------------------------------------------------------
@@ -2278,6 +2362,7 @@ class FlowEngine:
                     context, updates, CaminhoMapaMestre.ALUNO_SUPORTE,
                     ETAPA_ALUNO_MENU, _t("aluno_menu", context.idioma),
                     user_message,
+                    pergunta_curta=_t("aluno_menu_curta", context.idioma),
                 )
             # Observabilidade: registrar a opcao escolhida no handoff.
             logger.info(
@@ -2330,6 +2415,7 @@ class FlowEngine:
                     context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                     ETAPA_SISTEMA_OBJETIVO, _t("sistema_etapa1_2", idioma),
                     user_message,
+                    pergunta_curta=_t("sistema_etapa1_2_curta", idioma),
                 )
             _tent_clear(context, updates)
             if objetivo == "incorporar":
@@ -2513,6 +2599,9 @@ class FlowEngine:
                 return FlowResult(
                     _t("fechar_recusa", idioma), "continue", cam, ETAPA_DUVIDAS, updates,
                 )
+            # Auditoria CHK003 (task 4.2.3): "fechar_link" ja e bare (uma
+            # unica pergunta curta, sem saudacao/introducao embutida) —
+            # confirmado, sem `pergunta_curta` dedicada.
             return await self._reformular_ou_handoff(
                 context, updates, cam, ETAPA_FECHAMENTO, _t("fechar_link", idioma),
                 user_message,
@@ -2998,12 +3087,35 @@ class FlowEngine:
 
     # ------------------------------------------------------------------
     # Helpers de geracao de perguntas padrao (texto fixo — anti-alucinacao)
+    #
+    # AUDITORIA CHK003 consolidada (FASE 4, tasks 4.2.4-4.2.8 — os 10 call
+    # sites de `_reformular_ou_handoff` em `app/core/flow.py`): as 4 funcoes
+    # abaixo (`_gerar_pergunta_medico`/`_experiencia`/`_especialidade`/
+    # `_escolha_turma`, 8 dos 10 call sites, mais o call site bare de
+    # `fechar_link`/ETAPA_FECHAMENTO = 9) ja retornam texto BARE — uma unica
+    # pergunta de qualificacao/escolha, sem saudacao (`_ACKS`) nem explicacao
+    # de entrada embutida — CONFIRMADO por leitura direta dos blocos i18n
+    # correspondentes (`qualif_medico_c1/c2/lic`, `pergunta_medico`,
+    # `pergunta_experiencia`, `pergunta_especialidade`, `pergunta_turma`,
+    # `fechar_link`). Diferem estruturalmente do padrao causa-raiz
+    # (`sistema_etapa1_2`/`aluno_menu`, tasks 4.2.1/4.2.2): NAO reusam um
+    # bloco de entrada com saudacao "Perfeito!"/explicacao longa antes da
+    # pergunta — por isso NAO precisam de `pergunta_curta` dedicada;
+    # `_reformular_ou_handoff` usa `pergunta` como `pergunta_curta` (default
+    # quando o parametro e omitido, ver docstring de `_reformular_ou_handoff`).
+    # Nenhum codigo novo requerido alem da integracao com o wiring de 4.1.
     # ------------------------------------------------------------------
 
     async def _gerar_pergunta_medico(
         self, idioma: str, caminho: Optional[int] = None
     ) -> str:
-        """Pergunta de qualificacao medica fiel ao Mapa Mestre (texto por caminho)."""
+        """Pergunta de qualificacao medica fiel ao Mapa Mestre (texto por caminho).
+
+        Auditoria CHK003 (task 4.2.4): bare por construcao — todas as
+        chaves i18n usadas (`qualif_medico_c1/c2/lic`, `pergunta_medico`)
+        contem apenas a pergunta de qualificacao, sem saudacao/explicacao
+        de entrada embutida.
+        """
         chave = {
             CaminhoMapaMestre.CURSO_ONLINE_HG: "qualif_medico_c1",
             CaminhoMapaMestre.CURSOS_PRESENCIAIS: "qualif_medico_c2",
@@ -3012,12 +3124,15 @@ class FlowEngine:
         return (_t(chave, idioma) if chave else "") or _t("pergunta_medico", idioma)
 
     async def _gerar_pergunta_experiencia(self, idioma: str) -> str:
+        """Auditoria CHK003 (task 4.2.5): `pergunta_experiencia` e bare."""
         return _t("pergunta_experiencia", idioma)
 
     async def _gerar_pergunta_especialidade(self, idioma: str) -> str:
+        """Auditoria CHK003 (task 4.2.6): `pergunta_especialidade` e bare."""
         return _t("pergunta_especialidade", idioma)
 
     async def _gerar_pergunta_escolha_turma(self, idioma: str) -> str:
+        """Auditoria CHK003 (task 4.2.7): `pergunta_turma` e bare."""
         return _t("pergunta_turma", idioma)
 
 

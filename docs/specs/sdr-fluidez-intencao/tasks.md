@@ -159,61 +159,61 @@ Confirmação/Desambiguação Pendente; research.md Decision 6
 Ref: research.md Decision 3 (choke-point único), plan.md linha 85-93;
 Constitution Princípio I (Fidelidade ao Fluxo Oficial)
 
-- [ ] 2.2.1 Adicionar parâmetro obrigatório `user_message: str` à assinatura
+- [x] 2.2.1 Adicionar parâmetro obrigatório `user_message: str` à assinatura
   de `_reformular_ou_handoff` (`app/core/flow.py:1448`) — ANTES de
   incrementar `_tent_bump`
-- [ ] 2.2.2 Atualizar mecanicamente os 10 call sites existentes
+- [x] 2.2.2 Atualizar mecanicamente os 10 call sites existentes
   (`app/core/flow.py:1641/1692/1737/1877/1885/1904/2059/2071/2083/2095`) para
   passar `user_message` — sem lógica nova em cada site (essa mudança é só o
   encanamento; a lógica de conteúdo pergunta-curta vs bloco-de-entrada é
   tratada na FASE 4, task 4.2)
-- [ ] 2.2.3 Implementar pipeline do detector dentro de
+- [x] 2.2.3 Implementar pipeline do detector dentro de
   `_reformular_ou_handoff`: (1) léxico determinístico primeiro (1.2.1); (2)
   SOMENTE se não casar, fallback agentico confidence-gated (1.2.2/1.2.3) —
   invariante S-5
-- [ ] 2.2.4 Candidato claro COM marcador explícito de correção → despachar
+- [x] 2.2.4 Candidato claro COM marcador explícito de correção → despachar
   direto para o caminho-alvo via `_despachar_caminho` (sem pergunta
   intermediária)
-- [ ] 2.2.5 Candidato claro SEM marcador explícito (intenção implícita) →
+- [x] 2.2.5 Candidato claro SEM marcador explícito (intenção implícita) →
   setar `troca_pendente` tipo=`confirmacao` (edge case da spec, texto de
   1.3.1)
-- [ ] 2.2.6 Candidato ambíguo entre EXATAMENTE 2 caminhos → setar
+- [x] 2.2.6 Candidato ambíguo entre EXATAMENTE 2 caminhos → setar
   `troca_pendente` tipo=`desambiguacao` (FR-008/012, texto de 1.3.2)
-- [ ] 2.2.7 Candidato ambíguo entre 3+ caminhos ou não reconhecido por
+- [x] 2.2.7 Candidato ambíguo entre 3+ caminhos ou não reconhecido por
   nenhum estágio → cai no comportamento existente de reformulação/handoff
   (FR-010, dec-009 — sem estender FR-008)
-- [ ] 2.2.8 Implementar leitura de `troca_pendente` no INÍCIO de
+- [x] 2.2.8 Implementar leitura de `troca_pendente` no INÍCIO de
   `_process_core`, antes do resolver do nó (P-2/clarify Q1/dec-007) —
   mensagem corrente interpretada EXCLUSIVAMENTE como resposta à pendência;
   negação/não-reconhecimento limpa o campo e conta como tentativa da
   pergunta **original** (não uma tentativa nova)
-- [ ] 2.2.9 Teste de regressão: `_ETAPAS_AGUARDANDO_RESPOSTA` (fix #9)
+- [x] 2.2.9 Teste de regressão: `_ETAPAS_AGUARDANDO_RESPOSTA` (fix #9)
   permanece intocado na classificação GLOBAL de intenção
   (`app/core/flow.py:~1250-1300`) — o novo detector é mecanismo distinto que
   só roda após o resolver específico da etapa já ter falhado (Decision 4)
-- [ ] 2.2.10 Teste de regressão: `_aplicar_overflow_resume` continua
+- [x] 2.2.10 Teste de regressão: `_aplicar_overflow_resume` continua
   precedendo `_process_core` sem alteração de ordem — enquanto
   `context.overflow_blocos` não vazio, `troca_pendente` nunca é lido nem
   escrito (Decision 5/P-1, quickstart Cenário 10)
-- [ ] 2.2.11 Teste de regressão: resposta legítima e direta a uma pergunta
+- [x] 2.2.11 Teste de regressão: resposta legítima e direta a uma pergunta
   pendente NUNCA é lida como troca de caminho (FR-009, quickstart Cenário 4)
 
 ### 2.3 Preservação de perfil e zeragem de contador na troca `[C]`
 
 Ref: Spec FR-006, FR-007, FR-021; data-model.md §Relationships
 
-- [ ] 2.3.1 Teste confirmando que nenhum campo de qualificação (`eh_medico`,
+- [x] 2.3.1 Teste confirmando que nenhum campo de qualificação (`eh_medico`,
   `especialidade`, `experiencia_corporal`, `idioma`, `produto_interesse`) é
   resetado ou requisitado de novo após uma troca de caminho (perfil já é
   independente de `caminho`/`etapa` por construção — sem código novo
   necessário, apenas verificação)
-- [ ] 2.3.2 Chamar `_tent_clear` (já existente) na etapa abandonada durante
+- [x] 2.3.2 Chamar `_tent_clear` (já existente) na etapa abandonada durante
   o despacho da troca (FR-007), sem alterar os contadores de orçamento de
   turnos da sessão (`turnos_sessao`/`turnos_no_no`)
-- [ ] 2.3.3 Teste: ao retornar a um caminho já visitado, o despacho sempre
+- [x] 2.3.3 Teste: ao retornar a um caminho já visitado, o despacho sempre
   entra pela etapa inicial do caminho-alvo — NUNCA retoma o ponto salvo de
   uma visita anterior (FR-021, quickstart Cenário 12)
-- [ ] 2.3.4 Teste: correção de rumo para o MESMO caminho já ativo não gera
+- [x] 2.3.4 Teste: correção de rumo para o MESMO caminho já ativo não gera
   troca, reinício de contadores nem qualquer efeito colateral perceptível
   (edge case, quickstart Cenário 11)
 

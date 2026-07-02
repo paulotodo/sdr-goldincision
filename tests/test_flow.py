@@ -1308,7 +1308,16 @@ async def test_slotfilling_confianca_abaixo_do_limiar_reformula_nunca_adivinha()
     """3.2.3/3.4.6: confianca abaixo do limiar (SLOT_CONFIDENCE_THRESHOLD=0.6
     default) -> "nao entendido" -> reformula, NUNCA preenche o slot com o
     valor de baixa confianca. Usa Caminho 2 (cursos_presenciais) — reformula
-    incondicional (sem o atalho de pergunta-direta do Caminho 1)."""
+    incondicional (sem o atalho de pergunta-direta do Caminho 1).
+
+    Apos o resolver da etapa falhar, `_reformular_ou_handoff` tenta o
+    detector de troca de caminho (US1, FASE 2, research.md Decision 3) ANTES
+    de reformular -- como o lexico deterministico nao casa nada nesta
+    mensagem, o detector tambem invoca o fallback agentico (schema
+    "troca_caminho", S-5) antes de desistir e reformular normalmente.
+    `MockSlotExtractor.default` (valor=None) faz esse 2o call nao aceitar
+    nenhum candidato, entao o comportamento observavel (reformula, etapa
+    inalterada) permanece o mesmo -- so a contagem de calls muda."""
     msg = "trabalho nessa area ha alguns anos"
     slot_extractor = MockSlotExtractor(
         {msg: SlotQualificacao(valor="sim", confianca=0.3)}
@@ -1319,7 +1328,7 @@ async def test_slotfilling_confianca_abaixo_do_limiar_reformula_nunca_adivinha()
     r = await eng.process(1, msg, ctx)
 
     assert ctx.eh_medico is None  # nao adivinhou
-    assert slot_extractor.calls == ["elegibilidade_medica"]
+    assert slot_extractor.calls == ["elegibilidade_medica", "troca_caminho"]
     assert r.etapa == ETAPA_QUALIF_MEDICO  # reformula, permanece na etapa
 
 

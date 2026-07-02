@@ -33,17 +33,24 @@ Ref: checklists/requirements.md CHK008 (Gap: mecanismo de reconhecimento de
 o CONTEÚDO das variantes/typos não está enumerado); Spec FR-003, FR-013;
 research.md Decision 1
 
-- [ ] 1.1.1 Levantar, para cada um dos 6 caminhos do `CaminhoMapaMestre`, a
+- [x] 1.1.1 Levantar, para cada um dos 6 caminhos do `CaminhoMapaMestre`, a
   lista de nomes de produto/caminho e variantes normalizadas conhecidas
   (incluindo erros leves de digitação/acentuação já observados, ex.:
-  "harmoização"/"harmonização", "glutea"/"glútea") em PT
-- [ ] 1.1.2 Repetir 1.1.1 para EN e ES (nomenclatura equivalente por idioma)
-- [ ] 1.1.3 Levantar os tokens/frases de `_MARCADORES_CORRECAO` por idioma
+  "harmoização"/"harmonização", "glutea"/"glútea") em PT <!-- entregue como
+  `_LEXICO_CAMINHOS` em app/core/flow.py (dict[int, set[str]], 6 caminhos),
+  DRY com 1.2.1 -->
+- [x] 1.1.2 Repetir 1.1.1 para EN e ES (nomenclatura equivalente por idioma)
+  <!-- variantes EN/ES incluidas no mesmo set por caminho em
+  `_LEXICO_CAMINHOS` (matching e language-agnostic apos _norm()) -->
+- [x] 1.1.3 Levantar os tokens/frases de `_MARCADORES_CORRECAO` por idioma
   (pt: "na verdade", "me enganei", "prefiro"; en: "actually"; es: "de
-  hecho"; etc.), incluindo variantes leves
-- [ ] 1.1.4 Escrever teste de unidade que itera cada entrada do léxico
+  hecho"; etc.), incluindo variantes leves <!-- entregue como
+  `_MARCADORES_CORRECAO: dict[str, set[str]]` (pt/en/es) em app/core/flow.py -->
+- [x] 1.1.4 Escrever teste de unidade que itera cada entrada do léxico
   levantado e confirma matching por token/substring via `_norm()` —
   determinístico, nunca fuzzy-matching probabilístico (Decision 1)
+  <!-- tests/test_flow.py: 16 testes novos (cobertura + parametrize sobre
+  cada caminho/idioma), incluindo teste anti-fuzzy-matching -->
 
 ### 1.2 Implementar léxico compartilhado e fallback agentico confidence-gated `[C]`
 
@@ -51,9 +58,12 @@ Ref: research.md Decision 1/2, contracts/slot-troca-caminho.md, plan.md
 §Mapeamento FR-002/003/004; Constitution Princípio II (Anti-Alucinação
 Rígida)
 
-- [ ] 1.2.1 Criar constantes `_LEXICO_CAMINHOS: dict[int, set[str]]` e
+- [x] 1.2.1 Criar constantes `_LEXICO_CAMINHOS: dict[int, set[str]]` e
   `_MARCADORES_CORRECAO: dict[str, set[str]]` em `app/core/flow.py`,
   populadas com o conteúdo de 1.1, reusando `_norm()` (`app/core/flow.py:2805`)
+  <!-- entregue junto com 1.1 (mesma onda) para evitar duplicar o mesmo
+  conteudo em dois passos — ver nota DRY em 1.1.1. Constantes inseridas
+  logo apos `_destino_logico_por_caminho()`, antes do bloco i18n `_T`. -->
 - [ ] 1.2.2 Criar `_SLOT_SCHEMA_TROCA_CAMINHO` em `app/core/interpret.py`
   conforme `contracts/slot-troca-caminho.md` — reusar `SlotExtractor`, NÃO
   tocar `app/core/intent.py`/`IntentClassifier.classify()` (contrato de

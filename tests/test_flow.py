@@ -26,6 +26,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.core.flow import (
+    _LEXICO_CAMINHOS,
+    _MARCADORES_CORRECAO,
     ETAPA_ALUNO_MENU,
     ETAPA_DUVIDAS,
     ETAPA_ESCOLHA_TURMA,
@@ -53,6 +55,7 @@ from app.core.flow import (
     _detectar_opcao_aluno,
     _eh_pergunta_informativa,
     _merge_perfil,
+    _norm,
     _pede_humano,
     _perfil_conhecido,
     _saudacao,
@@ -1377,3 +1380,125 @@ async def test_reversao_llm_confianca_muito_alta_reverte_fato_consolidado():
     resolvido = await eng._resolver_eh_medico(ctx, msg)
 
     assert resolvido is False
+
+
+# ---------------------------------------------------------------------------
+# _LEXICO_CAMINHOS / _MARCADORES_CORRECAO (CHK008, task 1.1.4)
+#
+# O mecanismo de reconhecimento de "erro leve de digitacao/acentuacao"
+# (FR-003/FR-013) e pertencimento a um conjunto PRE-COMPUTADO de variantes
+# normalizadas — nunca distancia de edicao/fuzzy-matching probabilistico
+# (research.md Decision 1). Estes testes iteram TODA entrada de
+# `_LEXICO_CAMINHOS` e `_MARCADORES_CORRECAO` e confirmam, por construcao,
+# que o matching e via substring/token apos `_norm()`.
+# ---------------------------------------------------------------------------
+
+def test_lexico_caminhos_cobre_os_6_caminhos_oficiais():
+    """Os 6 caminhos do Mapa Mestre tem entrada no lexico, nenhum vazio."""
+    assert set(_LEXICO_CAMINHOS.keys()) == {
+        CaminhoMapaMestre.CURSO_ONLINE_HG,
+        CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+        CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+        CaminhoMapaMestre.ALUNO_SUPORTE,
+        CaminhoMapaMestre.PACIENTE_MODELO,
+        CaminhoMapaMestre.OUTRO_ASSUNTO,
+    }
+    for caminho, variantes in _LEXICO_CAMINHOS.items():
+        assert variantes, f"caminho {caminho} sem variantes no lexico"
+
+
+def test_marcadores_correcao_cobre_pt_en_es():
+    """Marcadores de correcao explicita definidos para os 3 idiomas suportados."""
+    assert set(_MARCADORES_CORRECAO.keys()) == {"pt", "en", "es"}
+    for idioma, marcadores in _MARCADORES_CORRECAO.items():
+        assert marcadores, f"idioma {idioma} sem marcadores de correcao"
+
+
+def test_lexico_caminhos_entradas_ja_pre_normalizadas():
+    """Toda entrada do lexico e idempotente sob _norm() — ou seja, ja esta
+    no formato (minusculas, sem acento, sem pontuacao) usado no matching
+    contra o texto do usuario normalizado. Garante que o dono do lexico nao
+    escreveu acidentalmente uma variante com acento/maiuscula que nunca
+    vai casar em runtime."""
+    for caminho, variantes in _LEXICO_CAMINHOS.items():
+        for variante in variantes:
+            assert _norm(variante) == variante, (
+                f"variante {variante!r} do caminho {caminho} nao esta "
+                f"pre-normalizada (_norm() produziria {_norm(variante)!r})"
+            )
+
+
+def test_marcadores_correcao_entradas_ja_pre_normalizadas():
+    for idioma, marcadores in _MARCADORES_CORRECAO.items():
+        for marcador in marcadores:
+            assert _norm(marcador) == marcador, (
+                f"marcador {marcador!r} ({idioma}) nao esta pre-normalizada"
+            )
+
+
+def test_lexico_caminhos_sem_overlap_entre_caminhos():
+    """Nenhuma variante literal e compartilhada entre dois caminhos
+    diferentes — uma mesma string nunca deve apontar para dois caminhos
+    ao mesmo tempo (a ambiguidade tratada pela Decision 6 e sobre
+    MENSAGENS que casam com >=2 conjuntos, nao sobre entradas duplicadas
+    no lexico)."""
+    vistas: dict[str, int] = {}
+    for caminho, variantes in _LEXICO_CAMINHOS.items():
+        for variante in variantes:
+            assert variante not in vistas, (
+                f"variante {variante!r} duplicada nos caminhos "
+                f"{vistas[variante]} e {caminho}"
+            )
+            vistas[variante] = caminho
+
+
+@pytest.mark.parametrize(
+    "caminho",
+    list(CaminhoMapaMestre),
+)
+def test_lexico_caminhos_cada_entrada_casa_via_norm_substring(caminho):
+    """Para CADA entrada de CADA caminho, uma mensagem sintetica contendo a
+    variante (embutida em frase realista) deve casar por substring apos
+    `_norm()` — o mesmo padrao de matching de `_detectar_escolha_turma`/
+    `_detectar_objetivo_sistema`. Determinístico: mesmo input sempre produz
+    o mesmo resultado."""
+    for variante in _LEXICO_CAMINHOS[caminho]:
+        mensagem = f"Ola, eu quero saber sobre {variante} por favor"
+        assert variante in _norm(mensagem), (
+            f"variante {variante!r} do caminho {caminho} nao casou via "
+            f"substring apos _norm()"
+        )
+
+
+@pytest.mark.parametrize("idioma", ["pt", "en", "es"])
+def test_marcadores_correcao_cada_entrada_casa_via_norm_substring(idioma):
+    for marcador in _MARCADORES_CORRECAO[idioma]:
+        mensagem = f"{marcador}, quero outra coisa"
+        assert marcador in _norm(mensagem), (
+            f"marcador {marcador!r} ({idioma}) nao casou via substring "
+            f"apos _norm()"
+        )
+
+
+def test_lexico_caminhos_nao_faz_fuzzy_matching_para_typo_nao_cadastrado():
+    """Confirma a ausencia de fuzzy-matching (Decision 1): um typo GROSSEIRO
+    que NAO esta explicitamente cadastrado no lexico nao deve casar —
+    reconhecimento e por pertencimento exato ao conjunto pre-computado,
+    nunca por distancia de edicao."""
+    typo_nao_cadastrado = _norm("xxzqorsso onlnee kkk123")
+    for variantes in _LEXICO_CAMINHOS.values():
+        for variante in variantes:
+            assert variante not in typo_nao_cadastrado
+
+
+def test_lexico_caminhos_acento_e_removido_pelo_norm_erro_leve_chk008():
+    """Exemplo concreto citado em CHK008/task 1.1.1: 'harmoização' (erro
+    leve, falta a letra 'n') e 'harmonização' (correto) sao ambos
+    reconhecidos para o Caminho 1, via _norm() + pertencimento ao lexico —
+    nao fuzzy-matching."""
+    variantes_curso_online = _LEXICO_CAMINHOS[CaminhoMapaMestre.CURSO_ONLINE_HG]
+    assert "harmoizacao glutea" in variantes_curso_online  # erro leve (typo)
+    assert "harmonizacao glutea" in variantes_curso_online  # correto
+    msg_normalizada = _norm("Quero fazer o curso de Harmoização Glútea")
+    assert msg_normalizada == "quero fazer o curso de harmoizacao glutea"
+    assert "harmoizacao glutea" in msg_normalizada

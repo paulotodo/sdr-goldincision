@@ -229,6 +229,105 @@ def _destino_logico_por_caminho(caminho: Optional[int]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Lexico compartilhado de produtos/caminhos e marcadores de correcao
+# (FR-002/003/004/011/012/013; research.md Decision 1). Fonte UNICA reusada
+# em DOIS pontos: (a) fast-path de texto livre do menu inicial, (b) detector
+# de troca de caminho no meio da jornada. Matching sempre via `_norm()`
+# (linha ~2805) + substring/token — nunca fuzzy-matching probabilistico
+# (mesmo padrao de `_detectar_escolha_turma`/`_detectar_objetivo_sistema`).
+# Todas as entradas ja estao PRE-NORMALIZADAS (minusculas, sem acento) porque
+# sao comparadas contra o resultado de `_norm(user_message)`, nunca contra
+# o texto cru. Conteudo levantado para fechar CHK008
+# (checklists/requirements.md) a partir dos 6 caminhos oficiais do Mapa
+# Mestre e dos textos i18n de `ChatResponder.generate_menu` (PT/EN/ES).
+# ---------------------------------------------------------------------------
+_LEXICO_CAMINHOS: dict[int, set[str]] = {
+    CaminhoMapaMestre.CURSO_ONLINE_HG: {
+        # PT
+        "curso online", "curso on line", "curso a distancia", "ead",
+        "harmonizacao glutea", "harmonizacao gluetea", "harmoizacao glutea",
+        "curso de harmonizacao", "curso online de harmonizacao",
+        "curso 1", "opcao 1",
+        # EN
+        "online course", "gluteal harmonization", "harmonization course",
+        # ES
+        "armonizacion glutea", "curso de armonizacion",
+    },
+    CaminhoMapaMestre.CURSOS_PRESENCIAIS: {
+        # PT
+        "curso presencial", "cursos presenciais", "aula presencial",
+        "modulo 1", "hg modulo 1", "hg360", "turma presencial",
+        "curso ao vivo", "workshop presencial", "curso 2", "opcao 2",
+        # EN
+        "presential course", "presential courses", "in person course",
+        "in-person course", "module 1",
+        # ES
+        "curso presencial", "cursos presenciales", "modulo 1",
+    },
+    CaminhoMapaMestre.SISTEMA_GOLDINCISION: {
+        # PT
+        "sistema goldincision", "licenciamento", "licenciar", "licenca",
+        "franquia", "franquear", "abrir uma clinica", "abrir clinica",
+        "quero uma franquia", "curso 3", "opcao 3",
+        # EN
+        "goldincision system", "licensing", "franchise", "license",
+        # ES
+        "sistema goldincision", "licenciamiento", "franquicia",
+    },
+    CaminhoMapaMestre.ALUNO_SUPORTE: {
+        # PT
+        "sou aluno", "ja sou aluno", "aluno", "preciso de suporte",
+        "suporte tecnico", "duvida do curso", "problema no curso",
+        "curso 4", "opcao 4",
+        # EN
+        "i am a student", "i'm a student", "student support", "need support",
+        # ES
+        "soy alumno", "necesito soporte", "soporte tecnico",
+    },
+    CaminhoMapaMestre.PACIENTE_MODELO: {
+        # PT
+        "paciente modelo", "quero ser paciente", "sou paciente",
+        "ser paciente modelo", "curso 5", "opcao 5",
+        # EN
+        "model patient", "i am a model patient", "become a patient",
+        # ES
+        "paciente modelo", "quiero ser paciente",
+    },
+    CaminhoMapaMestre.OUTRO_ASSUNTO: {
+        # PT
+        "outro assunto", "outra coisa", "nenhuma das opcoes",
+        "nenhuma das opcoes acima", "algo diferente", "curso 6", "opcao 6",
+        # EN
+        "other subject", "something else", "none of the above",
+        # ES
+        "otro asunto", "otra cosa", "ninguna de las opciones",
+    },
+}
+
+# Tokens/frases normalizadas que sinalizam CORRECAO EXPLICITA de intencao
+# (ex.: lead pediu X, depois diz que na verdade queria Y). Chave = idioma
+# (`pt`|`en`|`es`, mesmo shape de `Idioma`). Usado em conjunto com
+# `_LEXICO_CAMINHOS` pelo detector de troca de caminho (FR-002/003).
+_MARCADORES_CORRECAO: dict[str, set[str]] = {
+    "pt": {
+        "na verdade", "na realidade", "me enganei", "me confundi",
+        "prefiro", "quero mudar", "quero trocar", "mudei de ideia",
+        "desculpa o engano", "corrigindo", "voltar atras", "eu quis dizer",
+    },
+    "en": {
+        "actually", "in fact", "i changed my mind", "i meant",
+        "sorry i meant", "let me correct", "my mistake", "i prefer",
+        "i want to switch", "i want to change",
+    },
+    "es": {
+        "de hecho", "en realidad", "me equivoque", "quiero cambiar",
+        "cambio de opinion", "perdon me refiero", "prefiero",
+        "mejor dicho", "quiero decir",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # i18n — textos deterministicos (anti-alucinacao: nunca passam pelo LLM)
 # ---------------------------------------------------------------------------
 _T: dict[str, dict[str, str]] = {

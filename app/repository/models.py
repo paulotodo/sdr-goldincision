@@ -20,6 +20,7 @@ Implementacao completa: FASE 2, task 2.1.
 """
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime
 from typing import Optional
 
@@ -36,10 +37,22 @@ from sqlalchemy import (
     SmallInteger,
     Text,
     UniqueConstraint,
+    event,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def chunk_conteudo_hash(texto: str) -> str:
+    """
+    Identidade estavel do conteudo de um chunk (sha256 hex). O chunk e chaveado
+    por (fonte_tabela, idioma, conteudo_hash) — NAO pelo `fonte_id` volatil, que
+    muda a cada re-seed (o `run_seed` faz delete+insert de faq/objecao, gerando
+    ids seriais novos). Assim, conteudo INALTERADO entre boots => mesmo chunk
+    (mesmo id, embedding preservado), sem re-embedding nem crescimento da tabela.
+    """
+    return hashlib.sha256((texto or "").encode("utf-8")).hexdigest()
 
 
 class Base(DeclarativeBase):
@@ -430,6 +443,11 @@ class Chunk(Base):
     __tablename__ = "chunk"
     __table_args__ = (
         UniqueConstraint("fonte_tabela", "fonte_id", "idioma", name="uq_chunk_fonte"),
+        # Identidade por CONTEUDO (FR-009): conteudo inalterado => mesmo chunk
+        # entre boots, mesmo que o `fonte_id` de origem mude no re-seed.
+        UniqueConstraint(
+            "fonte_tabela", "idioma", "conteudo_hash", name="uq_chunk_conteudo"
+        ),
         CheckConstraint("tipo IN ('objecao','faq','base')", name="ck_chunk_tipo"),
         CheckConstraint("idioma IN ('pt','en','es')", name="ck_chunk_idioma"),
         Index(
@@ -451,6 +469,11 @@ class Chunk(Base):
     tipo: Mapped[str] = mapped_column(Text, nullable=False)       # objecao|faq|base
     idioma: Mapped[str] = mapped_column(Text, nullable=False)     # pt|en|es
     conteudo: Mapped[str] = mapped_column(Text, nullable=False)   # texto oficial verbatim
+    # Identidade estavel por conteudo (sha256 hex): chave de upsert do rag_seed,
+    # desacoplando o chunk do `fonte_id` volatil (ver `chunk_conteudo_hash`).
+    # Populado automaticamente no ORM via event listener abaixo; o rag_seed
+    # (INSERT Core/pg_insert) o informa explicitamente.
+    conteudo_hash: Mapped[str] = mapped_column(Text, nullable=False)
     # Provenancia deterministica (FR-008): de qual tabela/linha de origem este
     # chunk foi sincronizado (curso_objecao|faq) ou "admin" para tipo=base.
     fonte_tabela: Mapped[str] = mapped_column(Text, nullable=False)
@@ -474,3 +497,12 @@ class Chunk(Base):
     )
 
     curso: Mapped[Optional["Curso"]] = relationship("Curso")
+
+
+@event.listens_for(Chunk, "before_insert", propagate=True)
+@event.listens_for(Chunk, "before_update", propagate=True)
+def _chunk_preencher_conteudo_hash(_mapper, _connection, target: "Chunk") -> None:
+    """Popula `conteudo_hash` a partir de `conteudo` em qualquer INSERT/UPDATE
+    ORM (ex.: `/admin/chunks`). O `rag_seed` usa INSERT Core (`pg_insert`), que
+    NAO dispara eventos de mapper — la o hash e informado explicitamente."""
+    target.conteudo_hash = chunk_conteudo_hash(target.conteudo)

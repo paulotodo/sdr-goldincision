@@ -233,6 +233,61 @@ async def test_menu_opcoes_numericas_roteiam_sem_llm():
 
 
 @pytest.mark.asyncio
+async def test_menu_texto_livre_roteia_direto_sem_numero():
+    """US2/FR-011/013 (quickstart Cenario 5): resposta livre com nome de
+    produto -- com e sem erro leve -- direciona ao caminho correto no
+    fast-path deterministico do menu, sem exigir reenvio de numero e sem
+    depender do classificador LLM (AMBIGUA proposital)."""
+    casos = {
+        "curso online": CaminhoMapaMestre.CURSO_ONLINE_HG,
+        # Erro leve (typo/sem acentuacao) -- reproduz o caso real relatado
+        # na spec (harmonizacao glutea com typo), ja coberto pelo lexico
+        # compartilhado entregue na Fundacao (FASE 1).
+        "harmonização gluetea": CaminhoMapaMestre.CURSO_ONLINE_HG,
+        "curso presencial": CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+        "sou aluno": CaminhoMapaMestre.ALUNO_SUPORTE,
+    }
+    for texto, caminho_esperado in casos.items():
+        eng = engine(ClassificacaoIntencao.AMBIGUA)  # LLM nao ajuda
+        ctx = make_context(caminho=None, etapa=ETAPA_MENU)
+        r = await eng.process(1, texto, ctx)
+        assert r.caminho == caminho_esperado, (
+            f"texto={texto!r} deveria rotear para {caminho_esperado}, "
+            f"obteve {r.caminho}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_menu_texto_livre_ambiguo_entre_2_caminhos_pergunta_direta():
+    """US2/FR-012: resposta livre compativel com EXATAMENTE 2 caminhos
+    (termo generico curado 'curso') gera UMA pergunta direta de
+    desambiguacao -- nunca reapresenta o menu completo de 6 opcoes, nem
+    avanca caminho/etapa antes da resposta."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=None, etapa=ETAPA_MENU)
+    r = await eng.process(1, "curso", ctx)
+    assert r.action == "continue"
+    assert r.caminho is None
+    assert r.etapa == ETAPA_MENU
+    assert "MENU_PT" not in r.response_text
+    assert "?" in r.response_text
+
+
+@pytest.mark.asyncio
+async def test_menu_texto_livre_sem_caminho_reconhecivel_cai_no_existente():
+    """US2/FR-010 (dec-009/clarify Q4, quickstart Cenario 6): resposta que
+    nao indica claramente nenhum caminho (nem 1, nem exatamente 2) NAO
+    trava nem falha silenciosamente -- cai no comportamento existente
+    (reapresenta o menu, permanece em ETAPA_MENU)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=None, etapa=ETAPA_MENU)
+    r = await eng.process(1, "bom dia, tudo bem?", ctx)
+    assert r.action == "continue"
+    assert r.caminho is None
+    assert r.etapa == ETAPA_MENU
+
+
+@pytest.mark.asyncio
 async def test_pedido_humano_handoff_global():
     eng = engine(ClassificacaoIntencao.AMBIGUA)
     ctx = make_context(caminho=2, etapa=ETAPA_DUVIDAS, eh_medico=True)

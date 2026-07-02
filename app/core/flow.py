@@ -1641,6 +1641,54 @@ class FlowEngine:
                     context, user_message, updates, opcao
                 )
 
+            # 2.bis.i Fast-path de TEXTO LIVRE no menu inicial (US2,
+            # FR-011/012/013, tasks 3.1.1-3.1.2): MESMO reconhecimento
+            # deterministico do detector de troca de caminho (Decision 1) --
+            # nunca depende do classificador LLM. Ignora `tem_marcador` (nao
+            # ha correcao a marcar: e a escolha INICIAL, sem caminho ativo
+            # ainda para "corrigir").
+            candidatos_menu, _ = _candidatos_deterministicos_troca(
+                user_message, context.idioma,
+            )
+            if len(candidatos_menu) == 1:
+                escolhido = candidatos_menu[0]
+                logger.info(
+                    "flow: menu fast-path texto livre reconhecido=%s ticket_id=%s",
+                    escolhido, ticket_id,
+                )
+                context.caminho = escolhido
+                context.etapa = None
+                _tent_clear(context, updates)
+                updates["caminho_atual"] = escolhido
+                updates["etapa_mapa_mestre"] = None
+                return await self._despachar_caminho(
+                    context, user_message, updates, escolhido
+                )
+            if len(candidatos_menu) == 2:
+                # FR-012: pergunta direta de desambiguacao entre EXATAMENTE
+                # 2 caminhos candidatos -- NUNCA reapresenta o menu completo
+                # de 6 opcoes. Reusa a MESMA string i18n do detector de
+                # troca (`troca_caminho_desambiguacao`, ja neutra quanto a
+                # "troca" -- serve tanto para correcao mid-jornada quanto
+                # para a escolha INICIAL). Permanece em ETAPA_MENU sem novo
+                # estado persistido (data-model.md -- a resposta seguinte
+                # reentra neste MESMO fast-path; numeros e frases completas
+                # do lexico resolvem direto, o restante cai no comportamento
+                # existente, FR-010).
+                logger.info(
+                    "flow: menu fast-path ambiguo entre 2 caminhos candidatos=%s ticket_id=%s",
+                    candidatos_menu, ticket_id,
+                )
+                texto = _t("troca_caminho_desambiguacao", context.idioma).format(
+                    caminho_a=_nome_caminho(candidatos_menu[0], context.idioma),
+                    caminho_b=_nome_caminho(candidatos_menu[1], context.idioma),
+                )
+                return FlowResult(texto, "continue", None, ETAPA_MENU, updates)
+            # 0 ou 3+ candidatos (FR-010, dec-009/clarify Q4): cai no
+            # comportamento existente (classificador ja rodou antes deste
+            # bloco; sem estender FR-008 ao menu inicial, quickstart
+            # Cenario 6).
+
         # 3. Troca de caminho conservadora (Regra 10, mas sem reiniciar a jornada
         #    enquanto aguardamos a resposta de uma pergunta — fix #9).
         novo_caminho = INTENCAO_PARA_CAMINHO.get(intencao)

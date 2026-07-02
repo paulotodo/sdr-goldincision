@@ -225,31 +225,42 @@ Ref: Spec FR-006, FR-007, FR-021; data-model.md §Relationships
 
 Ref: Spec FR-011/012/013, plan.md linha 94 (`app/core/flow.py:1283`)
 
-- [ ] 3.1.1 Reusar `_LEXICO_CAMINHOS`/`_norm()` (1.2.1) no bloco "2.bis
+- [x] 3.1.1 Reusar `_LEXICO_CAMINHOS`/`_norm()` (1.2.1) no bloco "2.bis
   Menu" (`app/core/flow.py:1283`) para reconhecer resposta em texto livre —
   MESMO reconhecimento determinístico usado pelo detector de troca (FR-011)
-- [ ] 3.1.2 Implementar desambiguação quando a resposta livre for compatível
+  <!-- implementado via reuso direto de `_candidatos_deterministicos_troca`
+  (mesma pipeline lexico+termos-ambiguos do detector, onda-008) -->
+- [x] 3.1.2 Implementar desambiguação quando a resposta livre for compatível
   com EXATAMENTE 2 caminhos (FR-012) — pergunta direta, NUNCA reapresentar o
   menu completo de 6 opções
-- [ ] 3.1.3 Implementar fallback ao comportamento existente de reformulação
+  <!-- reusa a MESMA string i18n `troca_caminho_desambiguacao`; permanece em
+  ETAPA_MENU sem novo estado persistido (data-model.md so documenta a
+  reusa do lexico para o menu) -->
+- [x] 3.1.3 Implementar fallback ao comportamento existente de reformulação
   quando a resposta livre for compatível com 3+ caminhos (dec-009/clarify
   Q4) — sem estender FR-008 ao menu inicial
-- [ ] 3.1.4 Confirmar que erro leve de digitação/acentuação na resposta
+  <!-- satisfeito por construcao: 0 ou 3+ candidatos nao retornam no
+  fast-path, o fluxo cai no classificador/menu completo existente -->
+- [x] 3.1.4 Confirmar que erro leve de digitação/acentuação na resposta
   livre não impede o reconhecimento correto quando o caminho pretendido é
   reconhecível (FR-013)
+  <!-- validado empiricamente por teste (typo "harmonização gluetea") -->
 
 ### 3.2 Testes de regressão do fast-path do menu `[M]`
 
 Ref: quickstart.md Cenários 5 e 6
 
-- [ ] 3.2.1 Teste: resposta livre com nome de produto (com e sem erro leve)
+- [x] 3.2.1 Teste: resposta livre com nome de produto (com e sem erro leve)
   direciona ao caminho correto sem exigir reenvio de número (quickstart
   Cenário 5)
-- [ ] 3.2.2 Teste: resposta livre ambígua entre 2 caminhos gera pergunta
+  <!-- tests/test_flow.py::test_menu_texto_livre_roteia_direto_sem_numero -->
+- [x] 3.2.2 Teste: resposta livre ambígua entre 2 caminhos gera pergunta
   única de desambiguação, sem reapresentar o menu (quickstart Cenário 6)
-- [ ] 3.2.3 Teste: resposta livre que não indica claramente nenhum caminho
+  <!-- tests/test_flow.py::test_menu_texto_livre_ambiguo_entre_2_caminhos_pergunta_direta -->
+- [x] 3.2.3 Teste: resposta livre que não indica claramente nenhum caminho
   segue o comportamento existente de reformulação (não trava, não falha
   silenciosamente)
+  <!-- tests/test_flow.py::test_menu_texto_livre_sem_caminho_reconhecivel_cai_no_existente -->
 
 ---
 

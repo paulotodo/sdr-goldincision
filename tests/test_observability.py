@@ -433,3 +433,137 @@ def test_log_turno_campos_opcionais_default_none():
     assert e["intencao"] is None
     assert e["handoff_destino"] is None
     assert e["motivo"] is None
+
+
+# ---------------------------------------------------------------------------
+# Testes de log_turno — extensao aditiva (FASE 5, US4 — sdr-fluidez-intencao,
+# task 5.2; contracts/turno-event-extensao.md; data-model.md §Evento de
+# Turno). NAO repete os testes de anti-PII dedicados (tests/
+# test_anti_pii_turno.py) nem os de task 4.3 (tests/
+# test_fase4_seguranca_observabilidade.py) — cobre especificamente o shape
+# estendido (troca_caminho_*/troca_metodo/troca_confianca/
+# reformulacao_variante) e os invariantes E-1/E-2/E-3.
+# ---------------------------------------------------------------------------
+
+_BASE_TURNO_KWARGS_FASE5 = dict(
+    chamado_id=12345,
+    turno_sessao=7,
+    etapa_entrada="qualif_especialidade",
+    etapa_saida="sistema_objetivo",
+    idioma="pt",
+    n_blocos_enviados=1,
+    acao="resposta",
+    duracao_ms=2100,
+    tentativas=0,
+)
+
+
+def test_log_turno_campos_aditivos_ausentes_por_padrao():
+    """5.2.1: uma chamada SEM os novos kwargs produz EXATAMENTE o mesmo
+    payload de antes (aditivo puro) — nenhum dos 5 campos novos aparece."""
+    events = _capture_logs(log_turno, **_BASE_TURNO_KWARGS_FASE5)
+    assert len(events) == 1
+    e = events[0]
+    for campo in (
+        "troca_caminho_origem", "troca_caminho_destino", "troca_metodo",
+        "troca_confianca", "reformulacao_variante",
+    ):
+        assert campo not in e, f"{campo} nao deveria aparecer quando omitido"
+
+
+def test_log_turno_shape_estendido_troca_caminho_deterministico():
+    """5.2.1 + E-1/E-2: troca deterministica -- origem/destino/metodo
+    presentes juntos, confianca ausente (None -- lexico nao produz
+    confianca fracionaria)."""
+    events = _capture_logs(
+        log_turno,
+        **_BASE_TURNO_KWARGS_FASE5,
+        troca_caminho_origem=1,
+        troca_caminho_destino=3,
+        troca_metodo="deterministico",
+    )
+    assert len(events) == 1
+    e = events[0]
+    assert e["troca_caminho_origem"] == 1
+    assert e["troca_caminho_destino"] == 3
+    assert e["troca_metodo"] == "deterministico"
+    assert "troca_confianca" not in e  # E-2: nunca preenchido no deterministico
+    assert "reformulacao_variante" not in e
+
+
+def test_log_turno_shape_estendido_troca_caminho_assistido_com_confianca():
+    """5.2.1 + E-2: troca assistida (fallback agentico) -- confianca
+    fracionaria presente."""
+    events = _capture_logs(
+        log_turno,
+        **_BASE_TURNO_KWARGS_FASE5,
+        troca_caminho_origem=2,
+        troca_caminho_destino=5,
+        troca_metodo="assistido",
+        troca_confianca=0.87,
+    )
+    e = events[0]
+    assert e["troca_metodo"] == "assistido"
+    assert e["troca_confianca"] == 0.87
+
+
+def test_log_turno_shape_estendido_reformulacao_variante():
+    """5.2.1 + E-3: reformulacao humanizada -- so o indice da variante e
+    preenchido, sem nenhum campo de troca de caminho."""
+    events = _capture_logs(
+        log_turno,
+        **_BASE_TURNO_KWARGS_FASE5,
+        reformulacao_variante=1,
+    )
+    e = events[0]
+    assert e["reformulacao_variante"] == 1
+    for campo in (
+        "troca_caminho_origem", "troca_caminho_destino", "troca_metodo",
+        "troca_confianca",
+    ):
+        assert campo not in e
+
+
+def test_log_turno_emitido_exatamente_1x_com_troca_e_reformulacao_no_mesmo_turno():
+    """5.2.2: mesmo quando troca de caminho E reformulacao sao passadas
+    juntas no MESMO turno (caso hipotetico/defensivo -- na pratica os dois
+    mecanismos sao mutuamente exclusivos por construcao em
+    `FlowEngine._reformular_ou_handoff`, mas o contrato de `log_turno` em
+    si nao impoe essa exclusao), o evento continua emitido EXATAMENTE 1x
+    (C-1/C-2 do contrato original, sdr-turnos-obs/contracts/turno-event.md,
+    preservados) com AMBOS os grupos de campos presentes."""
+    events = _capture_logs(
+        log_turno,
+        **_BASE_TURNO_KWARGS_FASE5,
+        troca_caminho_origem=1,
+        troca_caminho_destino=4,
+        troca_metodo="deterministico",
+        reformulacao_variante=2,
+    )
+    assert len(events) == 1
+    e = events[0]
+    assert e["troca_caminho_origem"] == 1
+    assert e["troca_caminho_destino"] == 4
+    assert e["reformulacao_variante"] == 2
+    # Campos originais (Onda 1) continuam intactos, sem gaps (SC-006).
+    assert e["chamado_id"] == 12345
+    assert e["turno_sessao"] == 7
+    assert e["acao"] == "resposta"
+
+
+def test_log_turno_campos_aditivos_sao_apenas_metadados_estruturados():
+    """5.1.3/SEC-LLM-1 (defesa estrutural, espelha test_anti_pii_turno.py):
+    nenhum dos 5 novos parametros de log_turno aceita texto livre da
+    mensagem do lead -- apenas int/str-enum/float estruturados."""
+    import inspect
+    params = inspect.signature(log_turno).parameters
+    novos = {
+        "troca_caminho_origem", "troca_caminho_destino", "troca_metodo",
+        "troca_confianca", "reformulacao_variante",
+    }
+    assert novos <= set(params)
+    proibidos_de_conteudo_bruto = {
+        "mensagem", "texto", "conteudo", "user_message", "texto_lead",
+        "body", "raw_message", "mensagem_bruta",
+    }
+    assert not (set(params) & proibidos_de_conteudo_bruto)

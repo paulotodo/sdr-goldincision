@@ -173,6 +173,69 @@ def test_aceitar_valor_none_rejeita_mesmo_com_confianca_alta():
 
 
 # ---------------------------------------------------------------------------
+# SlotExtractor.aceitar() integrado a settings.intent_switch_confidence_threshold
+# (Fluidez de Intencao, task 1.2.6, contracts/slot-troca-caminho.md S-1/S-2).
+# Confirma que o slot "troca_caminho" so e aceito quando valor is not None
+# AND confianca >= settings.intent_switch_confidence_threshold — sem logica
+# de aceitacao NOVA (reusa SlotExtractor.aceitar() ja existente).
+# ---------------------------------------------------------------------------
+
+
+def test_aceitar_com_intent_switch_confidence_threshold_default_aceita_acima_do_limiar():
+    from app.config import Settings
+
+    settings = Settings()
+    slot = SlotQualificacao(
+        valor="curso_online", confianca=settings.intent_switch_confidence_threshold
+    )
+    assert (
+        SlotExtractor.aceitar(slot, settings.intent_switch_confidence_threshold)
+        is True
+    )
+
+
+def test_aceitar_com_intent_switch_confidence_threshold_rejeita_abaixo_do_limiar():
+    from app.config import Settings
+
+    settings = Settings()
+    slot = SlotQualificacao(
+        valor="curso_online",
+        confianca=settings.intent_switch_confidence_threshold - 0.01,
+    )
+    assert (
+        SlotExtractor.aceitar(slot, settings.intent_switch_confidence_threshold)
+        is False
+    )
+
+
+def test_aceitar_com_intent_switch_confidence_threshold_customizado_via_env(
+    monkeypatch,
+):
+    from app.config import Settings
+
+    monkeypatch.setenv("INTENT_SWITCH_CONFIDENCE_THRESHOLD", "0.9")
+    settings = Settings()
+    assert settings.intent_switch_confidence_threshold == 0.9
+
+    slot_abaixo = SlotQualificacao(valor="outro_assunto", confianca=0.85)
+    assert SlotExtractor.aceitar(slot_abaixo, settings.intent_switch_confidence_threshold) is False
+
+    slot_acima = SlotQualificacao(valor="outro_assunto", confianca=0.95)
+    assert SlotExtractor.aceitar(slot_acima, settings.intent_switch_confidence_threshold) is True
+
+
+def test_aceitar_com_intent_switch_confidence_threshold_valor_none_sempre_rejeita():
+    from app.config import Settings
+
+    settings = Settings()
+    slot = SlotQualificacao(valor=None, confianca=1.0)
+    assert (
+        SlotExtractor.aceitar(slot, settings.intent_switch_confidence_threshold)
+        is False
+    )
+
+
+# ---------------------------------------------------------------------------
 # permitir_reversao() — guarda contra reversao silenciosa (FASE 3.5/CHK014)
 # ---------------------------------------------------------------------------
 

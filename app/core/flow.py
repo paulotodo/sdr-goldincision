@@ -77,6 +77,53 @@ _CAMINHO_PARA_SLUG: dict[int, str | None] = {
     6: None,
 }
 
+# Nomes exibiveis (i18n) dos 6 caminhos do Mapa Mestre — conteudo de apoio
+# para os textos de confirmacao/desambiguacao de troca de caminho (FR-005,
+# FR-008/012, CHK009/CHK010). Usados para nomear o(s) caminho(s) candidato(s)
+# sem jamais reapresentar o menu completo de 6 opcoes.
+_NOMES_CAMINHOS: dict[int, dict[str, str]] = {
+    CaminhoMapaMestre.CURSO_ONLINE_HG: {
+        "pt": "o Curso Online HG",
+        "en": "the Online HG Course",
+        "es": "el Curso Online HG",
+    },
+    CaminhoMapaMestre.CURSOS_PRESENCIAIS: {
+        "pt": "os Cursos Presenciais HG",
+        "en": "the In-Person HG Courses",
+        "es": "los Cursos Presenciales HG",
+    },
+    CaminhoMapaMestre.SISTEMA_GOLDINCISION: {
+        "pt": "o Sistema GoldIncision (Licenciamento/Franquia)",
+        "en": "the GoldIncision System (Licensing/Franchise)",
+        "es": "el Sistema GoldIncision (Licencia/Franquicia)",
+    },
+    CaminhoMapaMestre.ALUNO_SUPORTE: {
+        "pt": "o suporte para alunos",
+        "en": "student support",
+        "es": "el soporte para alumnos",
+    },
+    CaminhoMapaMestre.PACIENTE_MODELO: {
+        "pt": "ser paciente modelo",
+        "en": "becoming a model patient",
+        "es": "ser paciente modelo",
+    },
+    CaminhoMapaMestre.OUTRO_ASSUNTO: {
+        "pt": "outro assunto",
+        "en": "another topic",
+        "es": "otro asunto",
+    },
+}
+
+
+def _nome_caminho(caminho: int, idioma: str) -> str:
+    """Nome exibivel (i18n) de um caminho do Mapa Mestre (`_NOMES_CAMINHOS`),
+    usado nos textos de confirmacao/desambiguacao de troca (FR-005,
+    FR-008/012, task 2.2.4/2.2.5/2.2.6) -- NUNCA reapresenta o menu completo
+    de 6 opcoes. Fallback PT, mesmo padrao de `_t()`."""
+    bloco = _NOMES_CAMINHOS.get(caminho, {})
+    return bloco.get(idioma) or bloco.get("pt", "")
+
+
 # Sub-slugs dos presenciais (dentro do Caminho 2)
 _SLUG_HG_MODULO_1 = "hg-modulo-1"
 _SLUG_HG360_SP = "hg360-sp"
@@ -134,6 +181,22 @@ _SLOT_SCHEMA_ESCOLHA_TURMA = {
         "'barcelona' (Espanha/Julho)."
     ),
     "valores_esperados": ["sp", "barcelona"],
+}
+# Fluidez de intencao (FR-002/003/004, contracts/slot-troca-caminho.md):
+# fallback agentico confidence-gated para deteccao de troca de caminho,
+# invocado SOMENTE quando `_LEXICO_CAMINHOS`/`_MARCADORES_CORRECAO`
+# (fast-path deterministico, acima) nao encontram correspondencia (S-5).
+_SLOT_SCHEMA_TROCA_CAMINHO = {
+    "nome": "troca_caminho",
+    "descricao": (
+        "O lead esta corrigindo o rumo da conversa e indicando que quer "
+        "outro caminho/produto diferente do caminho ativo. Extraia qual "
+        "caminho ele quer, se identificavel."
+    ),
+    "valores_esperados": [
+        "curso_online", "cursos_presenciais", "sistema_goldincision",
+        "aluno_suporte", "paciente_modelo", "outro_assunto",
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -226,6 +289,201 @@ def _destino_logico_por_caminho(caminho: Optional[int]) -> str:
     if caminho is None:
         return DEST_CONSULTORES
     return _DESTINO_POR_CAMINHO.get(caminho, DEST_CONSULTORES)
+
+
+# ---------------------------------------------------------------------------
+# Lexico compartilhado de produtos/caminhos e marcadores de correcao
+# (FR-002/003/004/011/012/013; research.md Decision 1). Fonte UNICA reusada
+# em DOIS pontos: (a) fast-path de texto livre do menu inicial, (b) detector
+# de troca de caminho no meio da jornada. Matching sempre via `_norm()`
+# (linha ~2805) + substring/token — nunca fuzzy-matching probabilistico
+# (mesmo padrao de `_detectar_escolha_turma`/`_detectar_objetivo_sistema`).
+# Todas as entradas ja estao PRE-NORMALIZADAS (minusculas, sem acento) porque
+# sao comparadas contra o resultado de `_norm(user_message)`, nunca contra
+# o texto cru. Conteudo levantado para fechar CHK008
+# (checklists/requirements.md) a partir dos 6 caminhos oficiais do Mapa
+# Mestre e dos textos i18n de `ChatResponder.generate_menu` (PT/EN/ES).
+# ---------------------------------------------------------------------------
+_LEXICO_CAMINHOS: dict[int, set[str]] = {
+    CaminhoMapaMestre.CURSO_ONLINE_HG: {
+        # PT
+        "curso online", "curso on line", "curso a distancia", "ead",
+        "harmonizacao glutea", "harmonizacao gluetea", "harmoizacao glutea",
+        "curso de harmonizacao", "curso online de harmonizacao",
+        "curso 1", "opcao 1",
+        # EN
+        "online course", "gluteal harmonization", "harmonization course",
+        # ES
+        "armonizacion glutea", "curso de armonizacion",
+    },
+    CaminhoMapaMestre.CURSOS_PRESENCIAIS: {
+        # PT
+        "curso presencial", "cursos presenciais", "aula presencial",
+        "modulo 1", "hg modulo 1", "hg360", "turma presencial",
+        "curso ao vivo", "workshop presencial", "curso 2", "opcao 2",
+        # EN
+        "presential course", "presential courses", "in person course",
+        "in-person course", "module 1",
+        # ES
+        "curso presencial", "cursos presenciales", "modulo 1",
+    },
+    CaminhoMapaMestre.SISTEMA_GOLDINCISION: {
+        # PT
+        "sistema goldincision", "licenciamento", "licenciar", "licenca",
+        "franquia", "franquear", "abrir uma clinica", "abrir clinica",
+        "quero uma franquia", "curso 3", "opcao 3",
+        # EN
+        "goldincision system", "licensing", "franchise", "license",
+        # ES
+        "sistema goldincision", "licenciamiento", "franquicia",
+    },
+    CaminhoMapaMestre.ALUNO_SUPORTE: {
+        # PT
+        "sou aluno", "ja sou aluno", "aluno", "preciso de suporte",
+        "suporte tecnico", "duvida do curso", "problema no curso",
+        "curso 4", "opcao 4",
+        # EN
+        "i am a student", "i'm a student", "student support", "need support",
+        # ES
+        "soy alumno", "necesito soporte", "soporte tecnico",
+    },
+    CaminhoMapaMestre.PACIENTE_MODELO: {
+        # PT
+        "paciente modelo", "quero ser paciente", "sou paciente",
+        "ser paciente modelo", "curso 5", "opcao 5",
+        # EN
+        "model patient", "i am a model patient", "become a patient",
+        # ES
+        "paciente modelo", "quiero ser paciente",
+    },
+    CaminhoMapaMestre.OUTRO_ASSUNTO: {
+        # PT
+        "outro assunto", "outra coisa", "nenhuma das opcoes",
+        "nenhuma das opcoes acima", "algo diferente", "curso 6", "opcao 6",
+        # EN
+        "other subject", "something else", "none of the above",
+        # ES
+        "otro asunto", "otra cosa", "ninguna de las opciones",
+    },
+}
+
+# Tokens/frases normalizadas que sinalizam CORRECAO EXPLICITA de intencao
+# (ex.: lead pediu X, depois diz que na verdade queria Y). Chave = idioma
+# (`pt`|`en`|`es`, mesmo shape de `Idioma`). Usado em conjunto com
+# `_LEXICO_CAMINHOS` pelo detector de troca de caminho (FR-002/003).
+_MARCADORES_CORRECAO: dict[str, set[str]] = {
+    "pt": {
+        "na verdade", "na realidade", "me enganei", "me confundi",
+        "prefiro", "quero mudar", "quero trocar", "mudei de ideia",
+        "desculpa o engano", "corrigindo", "voltar atras", "eu quis dizer",
+    },
+    "en": {
+        "actually", "in fact", "i changed my mind", "i meant",
+        "sorry i meant", "let me correct", "my mistake", "i prefer",
+        "i want to switch", "i want to change",
+    },
+    "es": {
+        "de hecho", "en realidad", "me equivoque", "quiero cambiar",
+        "cambio de opinion", "perdon me refiero", "prefiero",
+        "mejor dicho", "quiero decir",
+    },
+}
+
+# Termos GENERICOS demais para distinguir entre EXATAMENTE 2 caminhos
+# especificos (FR-008/012, quickstart Cenario 2: "menciona 'curso' sem
+# indicar modalidade" -> compativel com Caminho 1 e Caminho 2). Curado
+# deliberadamente (par fechado, nunca derivado/fuzzy) -- so os pares
+# documentados no Mapa Mestre como proximos o suficiente para ambiguidade
+# real; checado SOMENTE quando `_LEXICO_CAMINHOS` (frases especificas) nao
+# encontra nenhum candidato (a frase especifica sempre tem prioridade sobre
+# o termo generico). Chave = termo normalizado; valor = par de caminhos
+# (sempre exatamente 2 -- 3+ nunca e modelado aqui, dec-009).
+_TERMOS_AMBIGUOS_CAMINHOS: dict[str, tuple[int, int]] = {
+    "curso": (int(CaminhoMapaMestre.CURSO_ONLINE_HG), int(CaminhoMapaMestre.CURSOS_PRESENCIAIS)),
+    "course": (int(CaminhoMapaMestre.CURSO_ONLINE_HG), int(CaminhoMapaMestre.CURSOS_PRESENCIAIS)),
+}
+
+
+def _tem_marcador_correcao(t: str, idioma: str) -> bool:
+    """Marcador EXPLICITO de correcao de intencao presente na mensagem JA
+    normalizada `t` (`_norm(user_message)`), no idioma do lead
+    (`_MARCADORES_CORRECAO`, research.md Decision 1). Fallback PT quando o
+    idioma nao tem lista dedicada."""
+    marcadores = _MARCADORES_CORRECAO.get(idioma, _MARCADORES_CORRECAO["pt"])
+    return any(m in t for m in marcadores)
+
+
+def _candidatos_lexico_caminhos(t: str) -> list[int]:
+    """Caminhos cujo `_LEXICO_CAMINHOS` (frases especificas de produto/
+    caminho) casa como substring da mensagem JA normalizada `t`. Pode
+    retornar 0, 1 ou (raro/defensivo) mais de 1 candidato -- a ambiguidade
+    "de verdade" (termo generico demais, ex.: "curso" sozinho) e resolvida
+    por `_TERMOS_AMBIGUOS_CAMINHOS`, chamada apenas quando isto retorna
+    vazio (`_candidatos_deterministicos_troca`)."""
+    return [
+        int(caminho) for caminho, variantes in _LEXICO_CAMINHOS.items()
+        if any(v in t for v in variantes)
+    ]
+
+
+def _candidatos_deterministicos_troca(
+    user_message: str, idioma: str,
+) -> tuple[list[int], bool]:
+    """
+    Pipeline deterministico do detector de troca de caminho (FR-002/003,
+    research.md Decision 1): (1) `_LEXICO_CAMINHOS` (frases especificas);
+    (2) SOMENTE se nada casar, `_TERMOS_AMBIGUOS_CAMINHOS` (termo generico
+    ambiguo entre exatamente 2). Retorna `(candidatos, tem_marcador)` --
+    NUNCA mais de 2 candidatos (3+ especificos casando ao mesmo tempo e
+    tratado como "nao resolvido" pelo chamador, defensivo/raro, FR-010/
+    dec-009).
+    """
+    t = _norm(user_message)
+    tem_marcador = _tem_marcador_correcao(t, idioma)
+    candidatos = _candidatos_lexico_caminhos(t)
+    if not candidatos:
+        for termo, par in _TERMOS_AMBIGUOS_CAMINHOS.items():
+            if termo in t:
+                candidatos = list(par)
+                break
+    if len(candidatos) > 2:
+        candidatos = []
+    return candidatos, tem_marcador
+
+
+# Mapeamento FECHADO entre os `valores_esperados` de
+# `_SLOT_SCHEMA_TROCA_CAMINHO` (string livre extraida pelo LLM) e os 6
+# caminhos oficiais do Mapa Mestre. Usado exclusivamente por
+# `_valor_para_caminho()` abaixo.
+_VALOR_SLOT_TROCA_PARA_CAMINHO: dict[str, int] = {
+    "curso_online": CaminhoMapaMestre.CURSO_ONLINE_HG,
+    "cursos_presenciais": CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+    "sistema_goldincision": CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+    "aluno_suporte": CaminhoMapaMestre.ALUNO_SUPORTE,
+    "paciente_modelo": CaminhoMapaMestre.PACIENTE_MODELO,
+    "outro_assunto": CaminhoMapaMestre.OUTRO_ASSUNTO,
+}
+
+
+def _valor_para_caminho(valor: Optional[str]) -> Optional[int]:
+    """Mapeia o `slot.valor` extraido via `_SLOT_SCHEMA_TROCA_CAMINHO`
+    (contracts/slot-troca-caminho.md) para o `CaminhoMapaMestre`
+    correspondente.
+
+    Invariante **S-6** (achado do gate `owasp-security`): `SlotQualificacao
+    .valor` e `Optional[str]` SEM constraint de enum no nivel do Pydantic —
+    `valores_esperados` so orienta o PROMPT, nao e validado estruturalmente
+    pelo Structured Output. Logo `valor` PODE, em tese, conter uma string
+    fora dos 6 valores esperados (alucinacao/erro de formatacao do LLM).
+    Esta funcao e um mapeamento FECHADO e PURA (sem chamada de rede): nunca
+    levanta excecao, nunca adivinha o caminho mais "parecido" — qualquer
+    `None` ou string nao reconhecida retorna `None` (equivalente a
+    `SlotExtractor.aceitar()` ter rejeitado, cai no comportamento existente
+    de reformulacao, FR-010).
+    """
+    if valor is None:
+        return None
+    return _VALOR_SLOT_TROCA_PARA_CAMINHO.get(valor)
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +660,33 @@ _T: dict[str, dict[str, str]] = {
             "sentido para mí."
         ),
     },
+    # Versao BARE de "sistema_etapa1_2" (FASE 4, task 4.2.1, CHK003,
+    # research.md Decision 7 -- causa raiz CONFIRMADA): apenas a pergunta de
+    # objetivo + as 3 opcoes, SEM a saudacao "Perfeito! 😊" nem a explicacao
+    # longa dos 2 programas. Uso EXCLUSIVO em `_reformular_ou_handoff`
+    # (`pergunta_curta`) -- nunca no despacho inicial da etapa.
+    "sistema_etapa1_2_curta": {
+        "pt": (
+            "Qual destas opções representa melhor o seu objetivo?\n"
+            "1️⃣ Incorporar a técnica GoldIncision à minha clínica atual.\n"
+            "2️⃣ Abrir uma Clínica GoldIncision completa.\n"
+            "3️⃣ Ainda não tenho certeza e gostaria de entender qual modelo faz mais "
+            "sentido para mim."
+        ),
+        "en": (
+            "Which of these options best represents your goal?\n"
+            "1️⃣ Incorporate the GoldIncision technique into my current clinic.\n"
+            "2️⃣ Open a complete GoldIncision Clinic.\n"
+            "3️⃣ I'm not sure yet and would like to understand which model fits me best."
+        ),
+        "es": (
+            "¿Cuál de estas opciones representa mejor tu objetivo?\n"
+            "1️⃣ Incorporar la técnica GoldIncision a mi clínica actual.\n"
+            "2️⃣ Abrir una Clínica GoldIncision completa.\n"
+            "3️⃣ Aún no estoy seguro y me gustaría entender qué modelo tiene más "
+            "sentido para mí."
+        ),
+    },
     "sistema_lic_naomedico": {
         "pt": (
             "Obrigado por compartilhar! No momento, o Licenciamento GoldIncision é "
@@ -565,6 +850,43 @@ _T: dict[str, dict[str, str]] = {
         ),
         "es": (
             "¡Perfecto! Estaré encantado de dirigir tu atención. 😊\n"
+            "Para que nuestro equipo pueda ayudarte con más agilidad, ¿cuál de estos "
+            "asuntos representa mejor tu necesidad?\n"
+            "1️⃣ Plataforma y acceso al curso\n"
+            "2️⃣ Certificado de finalización\n"
+            "3️⃣ Grupo de soporte técnico\n"
+            "4️⃣ Pago o inscripción\n"
+            "5️⃣ Dudas sobre el curso\n"
+            "6️⃣ Otro asunto"
+        ),
+    },
+    # Versao BARE de "aluno_menu" (FASE 4, task 4.2.2, CHK003 -- achado NOVO,
+    # MESMO padrao estrutural de "sistema_etapa1_2"): apenas o submenu de 6
+    # opcoes, SEM a saudacao "Perfeito! Ficarei feliz...". Uso EXCLUSIVO em
+    # `_reformular_ou_handoff` (`pergunta_curta`) -- nunca no despacho
+    # inicial da etapa.
+    "aluno_menu_curta": {
+        "pt": (
+            "Para que nossa equipe possa ajudá-lo com mais agilidade, qual destes "
+            "assuntos melhor representa sua necessidade?\n"
+            "1️⃣ Plataforma e acesso ao curso\n"
+            "2️⃣ Certificado de conclusão\n"
+            "3️⃣ Grupo de suporte técnico\n"
+            "4️⃣ Pagamento ou inscrição\n"
+            "5️⃣ Dúvidas sobre o curso\n"
+            "6️⃣ Outro assunto"
+        ),
+        "en": (
+            "So our team can help you faster, which of these best represents your "
+            "need?\n"
+            "1️⃣ Platform and course access\n"
+            "2️⃣ Completion certificate\n"
+            "3️⃣ Technical support group\n"
+            "4️⃣ Payment or registration\n"
+            "5️⃣ Questions about the course\n"
+            "6️⃣ Other subject"
+        ),
+        "es": (
             "Para que nuestro equipo pueda ayudarte con más agilidad, ¿cuál de estos "
             "asuntos representa mejor tu necesidad?\n"
             "1️⃣ Plataforma y acceso al curso\n"
@@ -791,6 +1113,32 @@ _T: dict[str, dict[str, str]] = {
             "mensaje — sigamos donde lo dejamos."
         ),
     },
+    # Fluidez agentica de intencao (FASE 1.3, CHK009/CHK010, FR-005/008/012).
+    # Confirmacao breve e natural quando a troca de caminho ja foi despachada
+    # (marcador explicito de correcao, sem pergunta intermediaria — task
+    # 2.2.4). Usa `{caminho}` (preenchido via `_NOMES_CAMINHOS`); NAO repete
+    # o menu completo (Principio IV — Comunicacao Consultiva Premium).
+    "troca_caminho_confirmacao": {
+        "pt": "Entendido! Vamos seguir então com {caminho}. 😊",
+        "en": "Got it! Let's move forward with {caminho}. 😊",
+        "es": "¡Entendido! Sigamos entonces con {caminho}. 😊",
+    },
+    # Pergunta curta de confirmacao para o edge case de intencao IMPLICITA
+    # (sem marcador explicito de correcao) — seta `troca_pendente`
+    # tipo="confirmacao" (task 2.2.5) em vez de trocar silenciosamente.
+    "troca_caminho_confirmacao_pergunta": {
+        "pt": "Notei que você quer falar sobre {caminho} — posso seguir por aí?",
+        "en": "I noticed you'd like to talk about {caminho} — should I go ahead with that?",
+        "es": "Noté que quieres hablar sobre {caminho} — ¿sigo por ahí?",
+    },
+    # Pergunta direta de desambiguacao entre EXATAMENTE 2 caminhos candidatos
+    # (FR-008/012, task 2.2.6/3.1.2) — usa `{caminho_a}`/`{caminho_b}`
+    # (`_NOMES_CAMINHOS`); NUNCA reapresenta o menu completo de 6 opcoes.
+    "troca_caminho_desambiguacao": {
+        "pt": "Só para direcionar certinho: você prefere {caminho_a} ou {caminho_b}?",
+        "en": "Just to point you in the right direction: would you prefer {caminho_a} or {caminho_b}?",
+        "es": "Solo para orientarte bien: ¿prefieres {caminho_a} o {caminho_b}?",
+    },
 }
 
 
@@ -805,6 +1153,41 @@ _ACKS = {
     "pt": ["Perfeito", "Ótimo", "Que bom", "Combinado", "Maravilha", "Excelente"],
     "en": ["Perfect", "Great", "Wonderful", "Got it", "Excellent", "Sounds good"],
     "es": ["Perfecto", "Genial", "Estupendo", "De acuerdo", "Maravilloso", "Excelente"],
+}
+
+# Variantes i18n do PREFIXO de reformulacao (FASE 1.3, CHK011, FR-014/015,
+# dec-011/012 — ciclo sequencial deterministico). Bloco DISTINTO de `_ACKS`
+# (aberturas de confirmacao) e do antigo prefixo unico `"nao_entendi"`.
+#
+# Selecao (FASE 4, task 4.1.2): `variante_idx = (n - 1) % len(pool)` — pelo
+# numero da tentativa, garante por construcao que a variante do turno
+# imediatamente anterior nunca se repete.
+# Composicao final (FASE 4, task 4.1.3): `_REFORMULACOES[idioma][variante_idx]
+# + pergunta_curta` — substitui o reenvio verbatim atual
+# (`_t("nao_entendi", idioma) + pergunta`, ver uso de "nao_entendi" acima).
+#
+# Cada variante: (1) NAO repete a introducao/saudacao do bloco original
+# (essa e responsabilidade de `_ACKS`/`_saudacao`); (2) faz referencia breve
+# e generica ao que o lead disse, quando cabivel, sem citar literalmente a
+# mensagem (evita concatenacao fragil de texto arbitrario do usuario dentro
+# do pool estatico); (3) termina com espaco unico para concatenar direto com
+# `pergunta_curta`.
+_REFORMULACOES: dict[str, list[str]] = {
+    "pt": [
+        "Deixa eu tentar explicar de um outro jeito: ",
+        "Sobre o que você comentou, vou reformular para ficar mais claro: ",
+        "Só para garantir que ficou claro, vou colocar de outra forma: ",
+    ],
+    "en": [
+        "Let me try explaining that a different way: ",
+        "About what you mentioned, let me rephrase to make it clearer: ",
+        "Just to make sure it's clear, let me put it another way: ",
+    ],
+    "es": [
+        "Déjame intentar explicarlo de otra manera: ",
+        "Sobre lo que comentaste, voy a reformularlo para que quede más claro: ",
+        "Solo para asegurarme de que quedó claro, lo pongo de otra forma: ",
+    ],
 }
 
 
@@ -931,6 +1314,11 @@ class FlowResult:
         fidelidade_fiel: Optional[bool] = None,
         fidelidade_afirmacoes_nao_sustentadas: Optional[list] = None,
         fonte_ids: Optional[list] = None,
+        troca_caminho_origem: Optional[int] = None,
+        troca_caminho_destino: Optional[int] = None,
+        troca_metodo: Optional[str] = None,
+        troca_confianca: Optional[float] = None,
+        reformulacao_variante: Optional[int] = None,
     ):
         self.response_text = response_text
         self.action = action
@@ -964,6 +1352,21 @@ class FlowResult:
         # `GroundedResponder.last_fonte_ids`. None quando RAG nao foi
         # acionado neste turno (fast-path/verbatim/sem duvida).
         self.fonte_ids = fonte_ids
+        # Observabilidade aditiva (FASE 5, US4 — FR-017/FR-018, contracts/
+        # turno-event-extensao.md): atribuidos POS-HOC por
+        # `FlowEngine.process()` (mesmo padrao de confianca_slot/
+        # fidelidade_fiel/fonte_ids acima) a partir do que
+        # `_despachar_troca_caminho`/`_reformular_ou_handoff` registraram
+        # neste turno. None quando o mecanismo correspondente nao foi
+        # acionado (turno sem troca de caminho / sem reformulacao).
+        # `troca_caminho_origem`/`troca_caminho_destino` sao SEMPRE
+        # preenchidos juntos (E-1); `troca_confianca` so e nao-nulo quando
+        # `troca_metodo="assistido"` (E-2).
+        self.troca_caminho_origem = troca_caminho_origem
+        self.troca_caminho_destino = troca_caminho_destino
+        self.troca_metodo = troca_metodo
+        self.troca_confianca = troca_confianca
+        self.reformulacao_variante = reformulacao_variante
 
 
 class FlowEngine:
@@ -1009,6 +1412,14 @@ class FlowEngine:
         # quando o `SlotExtractor` de fato roda (fast-path resolvido nao
         # define confianca — nao ha "confianca do fallback" a reportar).
         self._last_confianca_slot: Optional[float] = None
+        # Observabilidade aditiva (FASE 5, US4 — FR-017/FR-018): dados da
+        # ULTIMA troca de caminho e da ULTIMA reformulacao (variante ciclica)
+        # acionadas no turno corrente. Mesmo padrao de `_last_confianca_slot`:
+        # resetados a cada `process()`, setados por
+        # `_despachar_troca_caminho`/`_reformular_ou_handoff` somente quando
+        # de fato acionados.
+        self._last_troca_caminho: Optional[dict] = None
+        self._last_reformulacao_variante: Optional[int] = None
 
     async def process(
         self, ticket_id: int, user_message: str, context: SessionContext
@@ -1036,6 +1447,8 @@ class FlowEngine:
         # nunca vazar o veredito/confianca de um turno anterior quando o
         # mecanismo correspondente nao e acionado no turno corrente.
         self._last_confianca_slot = None
+        self._last_troca_caminho = None
+        self._last_reformulacao_variante = None
         if self._responder is not None:
             self._responder.last_fidelidade_fiel = None
             self._responder.last_fidelidade_afirmacoes_nao_sustentadas = None
@@ -1068,6 +1481,12 @@ class FlowEngine:
                 self._responder.last_fidelidade_afirmacoes_nao_sustentadas
             )
             result.fonte_ids = self._responder.last_fonte_ids
+        if self._last_troca_caminho is not None:
+            result.troca_caminho_origem = self._last_troca_caminho["origem"]
+            result.troca_caminho_destino = self._last_troca_caminho["destino"]
+            result.troca_metodo = self._last_troca_caminho["metodo"]
+            result.troca_confianca = self._last_troca_caminho["confianca"]
+        result.reformulacao_variante = self._last_reformulacao_variante
         return result
 
     # ------------------------------------------------------------------
@@ -1246,6 +1665,31 @@ class FlowEngine:
         orcamento de turnos aplicado ao resultado final."""
         updates: dict = {}
 
+        # 0. Correcao de rumo mid-jornada (US1, FASE 2, task 2.2.8,
+        #    contracts/estado-troca-pendente.md P-2): consumir a pendencia de
+        #    confirmacao/desambiguacao de troca de caminho ANTES do resolver
+        #    do no -- a mensagem corrente e interpretada EXCLUSIVAMENTE como
+        #    resposta a ela, nunca como nova deteccao de troca. Mecanismo
+        #    DISTINTO da supressao de `_ETAPAS_AGUARDANDO_RESPOSTA` (fix #9,
+        #    passo 3 abaixo, research.md Decision 4): aquele bloqueia a
+        #    RECLASSIFICACAO GLOBAL de intencao; este consome uma pendencia
+        #    explicita ja setada pelo detector centralizado
+        #    (`_reformular_ou_handoff`) num turno anterior.
+        #    Reconhecida (confirma/escolhe) -> retorna aqui, curto-
+        #    circuitando classify/despacho normais. Nao reconhecida (nega/
+        #    nao-entendido) -> a pendencia e limpa e o processamento segue
+        #    normalmente abaixo, com a MESMA mensagem, contra a etapa/
+        #    pergunta ORIGINAL (inalterada) -- se o resolver dela tambem nao
+        #    reconhecer, `_reformular_ou_handoff` bumpa a tentativa
+        #    organicamente, satisfazendo "conta como tentativa da pergunta
+        #    ORIGINAL" (clarify Q1/dec-007) sem contagem duplicada.
+        if context.troca_caminho_pendente is not None:
+            resultado_pendente = await self._consumir_troca_pendente(
+                context, updates, user_message,
+            )
+            if resultado_pendente is not None:
+                return resultado_pendente
+
         # 1. Classificar intencao / detectar idioma
         intencao, idioma = await self._intent.classify(
             user_message,
@@ -1296,6 +1740,54 @@ class FlowEngine:
                 return await self._despachar_caminho(
                     context, user_message, updates, opcao
                 )
+
+            # 2.bis.i Fast-path de TEXTO LIVRE no menu inicial (US2,
+            # FR-011/012/013, tasks 3.1.1-3.1.2): MESMO reconhecimento
+            # deterministico do detector de troca de caminho (Decision 1) --
+            # nunca depende do classificador LLM. Ignora `tem_marcador` (nao
+            # ha correcao a marcar: e a escolha INICIAL, sem caminho ativo
+            # ainda para "corrigir").
+            candidatos_menu, _ = _candidatos_deterministicos_troca(
+                user_message, context.idioma,
+            )
+            if len(candidatos_menu) == 1:
+                escolhido = candidatos_menu[0]
+                logger.info(
+                    "flow: menu fast-path texto livre reconhecido=%s ticket_id=%s",
+                    escolhido, ticket_id,
+                )
+                context.caminho = escolhido
+                context.etapa = None
+                _tent_clear(context, updates)
+                updates["caminho_atual"] = escolhido
+                updates["etapa_mapa_mestre"] = None
+                return await self._despachar_caminho(
+                    context, user_message, updates, escolhido
+                )
+            if len(candidatos_menu) == 2:
+                # FR-012: pergunta direta de desambiguacao entre EXATAMENTE
+                # 2 caminhos candidatos -- NUNCA reapresenta o menu completo
+                # de 6 opcoes. Reusa a MESMA string i18n do detector de
+                # troca (`troca_caminho_desambiguacao`, ja neutra quanto a
+                # "troca" -- serve tanto para correcao mid-jornada quanto
+                # para a escolha INICIAL). Permanece em ETAPA_MENU sem novo
+                # estado persistido (data-model.md -- a resposta seguinte
+                # reentra neste MESMO fast-path; numeros e frases completas
+                # do lexico resolvem direto, o restante cai no comportamento
+                # existente, FR-010).
+                logger.info(
+                    "flow: menu fast-path ambiguo entre 2 caminhos candidatos=%s ticket_id=%s",
+                    candidatos_menu, ticket_id,
+                )
+                texto = _t("troca_caminho_desambiguacao", context.idioma).format(
+                    caminho_a=_nome_caminho(candidatos_menu[0], context.idioma),
+                    caminho_b=_nome_caminho(candidatos_menu[1], context.idioma),
+                )
+                return FlowResult(texto, "continue", None, ETAPA_MENU, updates)
+            # 0 ou 3+ candidatos (FR-010, dec-009/clarify Q4): cai no
+            # comportamento existente (classificador ja rodou antes deste
+            # bloco; sem estender FR-008 ao menu inicial, quickstart
+            # Cenario 6).
 
         # 3. Troca de caminho conservadora (Regra 10, mas sem reiniciar a jornada
         #    enquanto aguardamos a resposta de uma pergunta — fix #9).
@@ -1447,12 +1939,38 @@ class FlowEngine:
 
     async def _reformular_ou_handoff(
         self, context: SessionContext, updates: dict, caminho: int,
-        etapa: str, pergunta: str,
+        etapa: str, pergunta: str, user_message: str,
+        pergunta_curta: Optional[str] = None,
     ) -> FlowResult:
         """
-        Resposta nao reconhecida na etapa: incrementa tentativas. Apos N tentativas,
-        encaminha a humano em vez de repetir a pergunta para sempre (robustez, #8).
+        Resposta nao reconhecida na etapa: primeiro tenta o detector
+        centralizado de troca de caminho (US1, FASE 2, research.md
+        Decision 3 -- unico choke-point; satisfaz FR-001/FR-009 por
+        construcao, pois so e alcancado depois que o resolver ESPECIFICO da
+        etapa ja retornou `None`). Se nao detectar troca, cai no
+        comportamento ja existente: incrementa tentativas. Apos N
+        tentativas, encaminha a humano em vez de repetir a pergunta para
+        sempre (robustez, #8).
+
+        `pergunta_curta` (FASE 4, task 4.1.3, research.md Decision 7,
+        FR-014/FR-015): versao BARE da pergunta pendente, sem a
+        saudacao/introducao/explicacao do bloco de entrada do no -- usada em
+        TODAS as reformulacoes, inclusive na PRIMEIRA tentativa (n == 1;
+        causa raiz confirmada: antes desta task, `texto = pergunta`
+        reenviava o bloco de entrada completo verbatim quando n == 1). Se
+        omitido, usa `pergunta` como `pergunta_curta` -- seguro apenas para
+        call sites cuja `pergunta` ja e bare (auditoria CHK003, task 4.2:
+        `fechar_link` e os 4 `_gerar_pergunta_*`). Call sites cuja
+        `pergunta` reusa um bloco de entrada com saudacao/explicacao
+        embutida (achados: `sistema_etapa1_2` [task 4.2.1], `aluno_menu`
+        [task 4.2.2]) DEVEM fornecer `pergunta_curta` explicitamente.
         """
+        resultado_troca = await self._processar_deteccao_troca(
+            context, updates, caminho, user_message,
+        )
+        if resultado_troca is not None:
+            return resultado_troca
+
         n = _tent_bump(context, etapa, updates)
         if n >= _MAX_TENTATIVAS:
             return self._handoff(
@@ -1460,11 +1978,264 @@ class FlowEngine:
                 destino=DEST_CONSULTORES, motivo=f"nao_reconhecido:{etapa}",
             )
         updates["etapa_mapa_mestre"] = etapa
-        texto = pergunta
-        if n >= 2:
-            # Reformula: prefixa um reconhecimento + repete a pergunta com clareza.
-            texto = _t("nao_entendi", context.idioma) + pergunta
+        # Ciclo sequencial deterministico (FASE 4, task 4.1.2, FR-015,
+        # dec-011/dec-012): variante_idx = (n - 1) % len(pool) -- pelo
+        # numero da tentativa, garante por construcao que a variante do
+        # turno IMEDIATAMENTE ANTERIOR nunca se repete. Composicao final
+        # (task 4.1.3, FR-014): SEMPRE variante ciclica + pergunta_curta --
+        # nunca reenvia o bloco de entrada verbatim, nem na 1a tentativa.
+        curta = pergunta_curta if pergunta_curta is not None else pergunta
+        pool = _REFORMULACOES.get(context.idioma, _REFORMULACOES["pt"])
+        variante_idx = (n - 1) % len(pool)
+        texto = pool[variante_idx] + curta
+        # Observabilidade aditiva (FASE 5, US4 — FR-018, E-3): registra o
+        # indice da variante para o `process()` anexar ao FlowResult final
+        # POS-HOC (mesmo padrao de `_last_confianca_slot`/`_last_troca_
+        # caminho`). So atribuido neste ramo (reformulacao de fato emitida) —
+        # nunca no ramo de troca detectada nem no de handoff por limite.
+        self._last_reformulacao_variante = variante_idx
         return FlowResult(texto, "continue", caminho, etapa, updates)
+
+    # ------------------------------------------------------------------
+    # Deteccao de troca de caminho mid-jornada (US1, FASE 2, FR-001..FR-010,
+    # research.md Decision 1/2/3/6)
+    # ------------------------------------------------------------------
+
+    async def _detectar_troca_caminho(
+        self, context: SessionContext, user_message: str, caminho_atual: int,
+    ) -> Optional[tuple[list[int], str, Optional[float], bool]]:
+        """
+        Pipeline completo do detector: (1) lexico deterministico
+        (`_candidatos_deterministicos_troca`); (2) SOMENTE se nada casar,
+        fallback agentico confidence-gated via `SlotExtractor`
+        (contracts/slot-troca-caminho.md S-5). Retorna
+        `(candidatos, metodo, confianca, tem_marcador)` com o caminho ATUAL
+        ja excluido (Cenario 11 -- correcao para o mesmo caminho e no-op),
+        ou `None` quando nao ha nenhum candidato (cai no comportamento
+        existente, FR-010).
+        """
+        candidatos, tem_marcador = _candidatos_deterministicos_troca(
+            user_message, context.idioma,
+        )
+        metodo = "deterministico"
+        confianca: Optional[float] = None
+
+        if not candidatos and self._slot_extractor is not None:
+            # Fallback agentico confidence-gated (S-5, so quando o lexico
+            # deterministico nao encontrou nenhum candidato).
+            slot = await self._slot_extractor.extract(
+                _SLOT_SCHEMA_TROCA_CAMINHO, user_message, _perfil_conhecido(context),
+            )
+            self._last_confianca_slot = slot.confianca  # observabilidade aditiva
+            if SlotExtractor.aceitar(slot, settings.intent_switch_confidence_threshold):
+                destino = _valor_para_caminho(slot.valor)  # S-6: mapeamento fechado
+                if destino is not None:
+                    candidatos = [destino]
+                    metodo = "assistido"
+                    confianca = slot.confianca
+
+        # Cenario 11: correcao para o MESMO caminho ja ativo -- sem efeito
+        # colateral perceptivel (nenhuma pendencia/troca emitida).
+        candidatos = [c for c in candidatos if c != caminho_atual]
+        if not candidatos:
+            return None
+        return candidatos, metodo, confianca, tem_marcador
+
+    async def _processar_deteccao_troca(
+        self, context: SessionContext, updates: dict, caminho_atual: int,
+        user_message: str,
+    ) -> Optional[FlowResult]:
+        """
+        Aplica o resultado do detector a UMA das 4 saidas possiveis
+        (research.md Decision 3, FR-004/005/008/010): despacho direto
+        (marcador explicito + 1 candidato, task 2.2.4); confirmacao
+        pendente (1 candidato, sem marcador, task 2.2.5); desambiguacao
+        pendente (exatamente 2 candidatos, task 2.2.6); ou `None` (0 ou 3+
+        candidatos -- cai no comportamento existente, task 2.2.7).
+        """
+        deteccao = await self._detectar_troca_caminho(
+            context, user_message, caminho_atual,
+        )
+        if deteccao is None:
+            return None
+        candidatos, metodo, confianca, tem_marcador = deteccao
+
+        if len(candidatos) == 1:
+            destino = candidatos[0]
+            if tem_marcador:
+                return await self._despachar_troca_caminho(
+                    context, updates, caminho_atual, destino, user_message,
+                    metodo, confianca,
+                )
+            return self._pedir_confirmacao_troca(
+                context, updates, caminho_atual, destino, metodo, confianca,
+            )
+
+        if len(candidatos) == 2:
+            return self._pedir_desambiguacao_troca(
+                context, updates, caminho_atual, candidatos, metodo, confianca,
+            )
+
+        # 3+ candidatos (defensivo/raro) -- cai no comportamento existente.
+        return None
+
+    def _pedir_confirmacao_troca(
+        self, context: SessionContext, updates: dict, caminho_atual: int,
+        destino: int, metodo: str, confianca: Optional[float],
+    ) -> FlowResult:
+        """
+        Candidato claro SEM marcador explicito de correcao (intencao
+        implicita, edge case da spec, quickstart Cenario 9, task 2.2.5) --
+        pergunta de confirmacao curta em vez de trocar silenciosamente.
+        Seta `context.troca_caminho_pendente` (tipo="confirmacao", 1
+        destino); etapa/caminho permanecem inalterados ate a resposta do
+        proximo turno.
+        """
+        context.troca_caminho_pendente = {
+            "destinos": [destino], "origem": caminho_atual, "metodo": metodo,
+            "confianca": confianca, "tipo": "confirmacao",
+        }
+        texto = _t("troca_caminho_confirmacao_pergunta", context.idioma).format(
+            caminho=_nome_caminho(destino, context.idioma),
+        )
+        return FlowResult(texto, "continue", caminho_atual, context.etapa, updates)
+
+    def _pedir_desambiguacao_troca(
+        self, context: SessionContext, updates: dict, caminho_atual: int,
+        candidatos: list[int], metodo: str, confianca: Optional[float],
+    ) -> FlowResult:
+        """
+        Candidato ambiguo entre EXATAMENTE 2 caminhos (FR-008/012, task
+        2.2.6, quickstart Cenario 2) -- UMA pergunta direta de
+        desambiguacao, NUNCA reapresenta o menu completo de 6 opcoes. Seta
+        `context.troca_caminho_pendente` (tipo="desambiguacao", 2
+        destinos).
+        """
+        context.troca_caminho_pendente = {
+            "destinos": list(candidatos), "origem": caminho_atual,
+            "metodo": metodo, "confianca": confianca, "tipo": "desambiguacao",
+        }
+        idioma = context.idioma
+        texto = _t("troca_caminho_desambiguacao", idioma).format(
+            caminho_a=_nome_caminho(candidatos[0], idioma),
+            caminho_b=_nome_caminho(candidatos[1], idioma),
+        )
+        return FlowResult(texto, "continue", caminho_atual, context.etapa, updates)
+
+    async def _despachar_troca_caminho(
+        self, context: SessionContext, updates: dict, origem: int, destino: int,
+        user_message: str, metodo: str, confianca: Optional[float],
+    ) -> FlowResult:
+        """
+        Efetiva a troca de caminho (task 2.2.4, quickstart Cenario 1):
+        reinicia o caminho-alvo do ZERO (FR-021 -- nunca retoma etapa de
+        visita anterior, mesmo padrao da "troca de caminho conservadora" em
+        `_process_core`), zera o contador de tentativas da etapa abandonada
+        (`_tent_clear`, FR-007) sem tocar o orcamento de turnos, limpa
+        qualquer pendencia de confirmacao/desambiguacao (P-3) e preserva o
+        perfil do lead por construcao (FR-006 -- nenhum campo depende de
+        caminho/etapa, data-model.md §Relationships). Anuncia a troca de
+        forma breve antes de conduzir a conversa para o novo caminho
+        (FR-005).
+        """
+        logger.info(
+            "flow: troca de caminho mid-jornada origem=%s destino=%s metodo=%s ticket_id=%s",
+            origem, destino, metodo, context.ticket_id,
+        )
+        # Observabilidade aditiva (FASE 5, US4 — FR-017): registra a troca
+        # para o `process()` anexar ao FlowResult final POS-HOC (mesmo
+        # padrao de `_last_confianca_slot`). E-1 (turno-event-extensao.md):
+        # origem/destino sempre juntos; E-2: confianca so nao-nula quando
+        # metodo="assistido" — ja garantido por `_detectar_troca_caminho`.
+        self._last_troca_caminho = {
+            "origem": origem, "destino": destino, "metodo": metodo,
+            "confianca": confianca,
+        }
+        context.caminho = destino
+        context.etapa = None
+        _tent_clear(context, updates)
+        context.troca_caminho_pendente = None
+        updates["caminho_atual"] = destino
+        updates["etapa_mapa_mestre"] = None
+        resultado = await self._despachar_caminho(context, user_message, updates, destino)
+        anuncio = _t("troca_caminho_confirmacao", context.idioma).format(
+            caminho=_nome_caminho(destino, context.idioma),
+        )
+        resultado.response_text = (anuncio + "\n\n" + (resultado.response_text or "")).strip()
+        return resultado
+
+    async def _consumir_troca_pendente(
+        self, context: SessionContext, updates: dict, user_message: str,
+    ) -> Optional[FlowResult]:
+        """
+        Consome a pergunta de confirmacao/desambiguacao de troca de caminho
+        pendente (US1, FASE 2, task 2.2.8, P-2): a mensagem corrente e
+        interpretada EXCLUSIVAMENTE como resposta a ela -- o detector de
+        `_reformular_ou_handoff` NUNCA roda aqui.
+
+        Reconhecida (confirma/escolhe) -> despacha para o destino (reusa
+        `_despachar_troca_caminho`) e retorna o `FlowResult` (curto-
+        circuita o restante de `_process_core`).
+
+        Nao reconhecida (nega/nao-entendido) -> limpa a pendencia e retorna
+        `None`: o processamento segue normalmente por `_process_core` com a
+        MESMA mensagem, contra a etapa/pergunta ORIGINAL (inalterada) -- se
+        o resolver dela tambem nao reconhecer, `_reformular_ou_handoff`
+        bumpa a tentativa organicamente, satisfazendo "conta como tentativa
+        da pergunta ORIGINAL" (clarify Q1/dec-007) sem contagem duplicada.
+
+        Dado malformado (defensivo, fail-open/P-4) -> limpa e retorna
+        `None`.
+        """
+        pendente = context.troca_caminho_pendente or {}
+        tipo = pendente.get("tipo")
+        destinos_raw = pendente.get("destinos")
+        origem = pendente.get("origem")
+        valido = (
+            tipo in ("confirmacao", "desambiguacao")
+            and isinstance(destinos_raw, list) and len(destinos_raw) > 0
+            and all(isinstance(d, int) and not isinstance(d, bool) for d in destinos_raw)
+            and isinstance(origem, int) and not isinstance(origem, bool)
+        )
+        if not valido:
+            context.troca_caminho_pendente = None
+            return None
+
+        escolhido: Optional[int] = None
+        if tipo == "confirmacao":
+            if _detectar_confirmacao(user_message) is True:
+                escolhido = destinos_raw[0]
+        else:
+            # Desambiguacao: a resposta costuma ser CURTA ("online",
+            # "presencial") -- checar as DUAS direcoes de substring: variante
+            # dentro da mensagem (mensagem mais longa, ex.: "quero o curso
+            # online") OU mensagem dentro da variante (resposta curta contida
+            # na frase-variante mais longa, ex.: t="online" em v="curso
+            # online"). Guarda `len(t) >= 3` evita casar t de 1-2 chars por
+            # acidente dentro de alguma variante.
+            t = _norm(user_message)
+            for cand in destinos_raw:
+                variantes = _LEXICO_CAMINHOS.get(cand, set())
+                if any(
+                    v in t or (len(t) >= 3 and t in v) for v in variantes
+                ):
+                    escolhido = cand
+                    break
+            if escolhido is None:
+                n = _opcao_numerica(t, len(destinos_raw))
+                if n is not None and 1 <= n <= len(destinos_raw):
+                    escolhido = destinos_raw[n - 1]
+
+        if escolhido is not None:
+            return await self._despachar_troca_caminho(
+                context, updates, origem, escolhido, user_message,
+                pendente.get("metodo") or "deterministico",
+                pendente.get("confianca"),
+            )
+
+        # Nao reconhecido/negado -- limpa e deixa o fluxo normal seguir.
+        context.troca_caminho_pendente = None
+        return None
 
     # ------------------------------------------------------------------
     # Interpretacao Agentica / Slot-Filling por etapa (Pilar 8, FR-013..FR-018)
@@ -1641,6 +2412,8 @@ class FlowEngine:
                 return await self._reformular_ou_handoff(
                     context, updates, CaminhoMapaMestre.ALUNO_SUPORTE,
                     ETAPA_ALUNO_MENU, _t("aluno_menu", context.idioma),
+                    user_message,
+                    pergunta_curta=_t("aluno_menu_curta", context.idioma),
                 )
             # Observabilidade: registrar a opcao escolhida no handoff.
             logger.info(
@@ -1692,6 +2465,8 @@ class FlowEngine:
                 return await self._reformular_ou_handoff(
                     context, updates, CaminhoMapaMestre.SISTEMA_GOLDINCISION,
                     ETAPA_SISTEMA_OBJETIVO, _t("sistema_etapa1_2", idioma),
+                    user_message,
+                    pergunta_curta=_t("sistema_etapa1_2_curta", idioma),
                 )
             _tent_clear(context, updates)
             if objetivo == "incorporar":
@@ -1740,6 +2515,7 @@ class FlowEngine:
                     await self._gerar_pergunta_medico(
                         idioma, CaminhoMapaMestre.SISTEMA_GOLDINCISION
                     ),
+                    user_message,
                 )
             context.eh_medico = eh_medico
             updates["eh_medico"] = eh_medico
@@ -1874,8 +2650,12 @@ class FlowEngine:
                 return FlowResult(
                     _t("fechar_recusa", idioma), "continue", cam, ETAPA_DUVIDAS, updates,
                 )
+            # Auditoria CHK003 (task 4.2.3): "fechar_link" ja e bare (uma
+            # unica pergunta curta, sem saudacao/introducao embutida) —
+            # confirmado, sem `pergunta_curta` dedicada.
             return await self._reformular_ou_handoff(
                 context, updates, cam, ETAPA_FECHAMENTO, _t("fechar_link", idioma),
+                user_message,
             )
 
         # Etapa de link pendente de qualificacao medica (gate de fechamento)
@@ -1885,6 +2665,7 @@ class FlowEngine:
                 return await self._reformular_ou_handoff(
                     context, updates, cam, ETAPA_LINK,
                     await self._gerar_pergunta_medico(idioma, cam),
+                    user_message,
                 )
             context.eh_medico = eh_medico
             updates["eh_medico"] = eh_medico
@@ -1904,6 +2685,7 @@ class FlowEngine:
                 return await self._reformular_ou_handoff(
                     context, updates, cam, ETAPA_QUALIF_MEDICO,
                     await self._gerar_pergunta_medico(idioma, cam),
+                    user_message,
                 )
 
         # Sinal forte de fechamento (quer o link / inscrever-se): conduzir ao
@@ -2059,6 +2841,7 @@ class FlowEngine:
                 return await self._reformular_ou_handoff(
                     context, updates, cam, ETAPA_QUALIF_MEDICO,
                     await self._gerar_pergunta_medico(idioma, cam),
+                    user_message,
                 )
 
         if context.etapa == ETAPA_QUALIF_EXPERIENCIA and context.experiencia_corporal is None:
@@ -2071,6 +2854,7 @@ class FlowEngine:
                 return await self._reformular_ou_handoff(
                     context, updates, cam, ETAPA_QUALIF_EXPERIENCIA,
                     await self._gerar_pergunta_experiencia(idioma),
+                    user_message,
                 )
 
         if context.etapa == ETAPA_QUALIF_ESPECIALIDADE and not context.especialidade:
@@ -2083,6 +2867,7 @@ class FlowEngine:
                 return await self._reformular_ou_handoff(
                     context, updates, cam, ETAPA_QUALIF_ESPECIALIDADE,
                     await self._gerar_pergunta_especialidade(idioma),
+                    user_message,
                 )
 
         if context.etapa == ETAPA_ESCOLHA_TURMA and not context.produto_interesse:
@@ -2095,6 +2880,7 @@ class FlowEngine:
                 return await self._reformular_ou_handoff(
                     context, updates, cam, ETAPA_ESCOLHA_TURMA,
                     await self._gerar_pergunta_escolha_turma(idioma),
+                    user_message,
                 )
 
         # --- Fluxo de qualificacao (ETAPA 1) ---
@@ -2352,12 +3138,35 @@ class FlowEngine:
 
     # ------------------------------------------------------------------
     # Helpers de geracao de perguntas padrao (texto fixo — anti-alucinacao)
+    #
+    # AUDITORIA CHK003 consolidada (FASE 4, tasks 4.2.4-4.2.8 — os 10 call
+    # sites de `_reformular_ou_handoff` em `app/core/flow.py`): as 4 funcoes
+    # abaixo (`_gerar_pergunta_medico`/`_experiencia`/`_especialidade`/
+    # `_escolha_turma`, 8 dos 10 call sites, mais o call site bare de
+    # `fechar_link`/ETAPA_FECHAMENTO = 9) ja retornam texto BARE — uma unica
+    # pergunta de qualificacao/escolha, sem saudacao (`_ACKS`) nem explicacao
+    # de entrada embutida — CONFIRMADO por leitura direta dos blocos i18n
+    # correspondentes (`qualif_medico_c1/c2/lic`, `pergunta_medico`,
+    # `pergunta_experiencia`, `pergunta_especialidade`, `pergunta_turma`,
+    # `fechar_link`). Diferem estruturalmente do padrao causa-raiz
+    # (`sistema_etapa1_2`/`aluno_menu`, tasks 4.2.1/4.2.2): NAO reusam um
+    # bloco de entrada com saudacao "Perfeito!"/explicacao longa antes da
+    # pergunta — por isso NAO precisam de `pergunta_curta` dedicada;
+    # `_reformular_ou_handoff` usa `pergunta` como `pergunta_curta` (default
+    # quando o parametro e omitido, ver docstring de `_reformular_ou_handoff`).
+    # Nenhum codigo novo requerido alem da integracao com o wiring de 4.1.
     # ------------------------------------------------------------------
 
     async def _gerar_pergunta_medico(
         self, idioma: str, caminho: Optional[int] = None
     ) -> str:
-        """Pergunta de qualificacao medica fiel ao Mapa Mestre (texto por caminho)."""
+        """Pergunta de qualificacao medica fiel ao Mapa Mestre (texto por caminho).
+
+        Auditoria CHK003 (task 4.2.4): bare por construcao — todas as
+        chaves i18n usadas (`qualif_medico_c1/c2/lic`, `pergunta_medico`)
+        contem apenas a pergunta de qualificacao, sem saudacao/explicacao
+        de entrada embutida.
+        """
         chave = {
             CaminhoMapaMestre.CURSO_ONLINE_HG: "qualif_medico_c1",
             CaminhoMapaMestre.CURSOS_PRESENCIAIS: "qualif_medico_c2",
@@ -2366,12 +3175,15 @@ class FlowEngine:
         return (_t(chave, idioma) if chave else "") or _t("pergunta_medico", idioma)
 
     async def _gerar_pergunta_experiencia(self, idioma: str) -> str:
+        """Auditoria CHK003 (task 4.2.5): `pergunta_experiencia` e bare."""
         return _t("pergunta_experiencia", idioma)
 
     async def _gerar_pergunta_especialidade(self, idioma: str) -> str:
+        """Auditoria CHK003 (task 4.2.6): `pergunta_especialidade` e bare."""
         return _t("pergunta_especialidade", idioma)
 
     async def _gerar_pergunta_escolha_turma(self, idioma: str) -> str:
+        """Auditoria CHK003 (task 4.2.7): `pergunta_turma` e bare."""
         return _t("pergunta_turma", idioma)
 
 

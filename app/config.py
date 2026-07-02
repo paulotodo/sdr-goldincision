@@ -151,6 +151,15 @@ class Settings(BaseSettings):
     # disso -> tratado como "nao entendido" -> reformula (nunca adivinha).
     slot_confidence_threshold: float = 0.6
 
+    # --- Fluidez de Intencao / Troca de Caminho (FR-002..FR-004) ---
+    # Limiar minimo de confianca para aceitar o slot "troca_caminho"
+    # extraido pelo fallback agentico confidence-gated (app/core/flow.py,
+    # _SLOT_SCHEMA_TROCA_CAMINHO), invocado apenas quando o fast-path
+    # deterministico por lexico (_LEXICO_CAMINHOS/_MARCADORES_CORRECAO) nao
+    # reconhece a mensagem. Abaixo disso -> nao aceita -> reformula (nunca
+    # adivinha), mesmo padrao de slot_confidence_threshold.
+    intent_switch_confidence_threshold: float = 0.6
+
     # --- RAG Hibrido (Onda 3, FR-007..FR-023) ---
     # Modelo de embeddings usado por OpenAIClient.embed() / app/rag_seed.py
     # (data-model.md §4). 1536 dimensoes (Vector(1536) em app.repository.models.Chunk).

@@ -79,6 +79,20 @@ def test_slot_confidence_threshold_override_via_env(monkeypatch):
     assert s.slot_confidence_threshold == 0.75
 
 
+def test_intent_switch_confidence_threshold_default():
+    """Fluidez de intencao (FASE 1, task 1.2.4): default = 0.6, mesmo
+    padrao de slot_confidence_threshold (contracts/slot-troca-caminho.md S-2)."""
+    s = Settings()
+    assert s.intent_switch_confidence_threshold == 0.6
+    assert isinstance(s.intent_switch_confidence_threshold, float)
+
+
+def test_intent_switch_confidence_threshold_override_via_env(monkeypatch):
+    monkeypatch.setenv("INTENT_SWITCH_CONFIDENCE_THRESHOLD", "0.8")
+    s = Settings()
+    assert s.intent_switch_confidence_threshold == 0.8
+
+
 def test_rag_config_defaults():
     """RAG Hibrido (Onda 3, FASE 7, task 7.1.1/7.1.3) — defaults documentados
     em data-model.md §4 (mesmos usados por HybridRetriever, FASE 4)."""

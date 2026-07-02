@@ -230,6 +230,61 @@ async def _persist_overflow(
         )
 
 
+async def _load_troca_pendente(chamado_id: int) -> Optional[dict]:
+    """
+    Le o estado de confirmacao/desambiguacao de troca de caminho pendente
+    (JSON) do hash `estado:{chamadoId}` (US1, FASE 2, task 2.1.3,
+    contracts/estado-troca-pendente.md P-4). Fail-open: `HGET` ausente ou
+    JSON corrompido/nao-dict -> `None` (tratado como "sem pergunta
+    pendente" — nunca bloqueia o atendimento). Chamado ANTES de
+    `engine.process()` (hidrata `context.troca_caminho_pendente`).
+    """
+    try:
+        redis = _get_redis()
+        key = redis_keys.estado_key(chamado_id)
+        raw = await redis.hget(key, redis_keys.TROCA_PENDENTE_FIELD)
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        valor = json.loads(raw)
+        if not isinstance(valor, dict):
+            return None
+        return valor
+    except Exception:
+        logger.warning(
+            "webhook: falha ao ler troca_pendente chamado_id=%s",
+            chamado_id,
+            exc_info=True,
+        )
+        return None
+
+
+async def _persist_troca_pendente(chamado_id: int, valor: Optional[dict]) -> None:
+    """
+    Persiste (ou LIMPA) o estado de confirmacao/desambiguacao de troca de
+    caminho pendente apos o turno (US1, FASE 2, task 2.1.4,
+    contracts/estado-troca-pendente.md P-3): `context.troca_caminho_pendente`
+    (mutado pelo FlowEngine) e a fonte da verdade do turno — aqui apenas
+    espelhamos em Redis. Vazio/`None` -> `HDEL` explicito (nunca fica
+    "pendurado"). Fail-open (nunca gateia o turno). Diferente do overflow,
+    nao depende do envio da mensagem — chamado logo apos `engine.process()`.
+    """
+    try:
+        redis = _get_redis()
+        key = redis_keys.estado_key(chamado_id)
+        if valor:
+            await redis.hset(key, redis_keys.TROCA_PENDENTE_FIELD, json.dumps(valor))
+        else:
+            await redis.hdel(key, redis_keys.TROCA_PENDENTE_FIELD)
+    except Exception:
+        logger.warning(
+            "webhook: falha ao persistir troca_pendente chamado_id=%s",
+            chamado_id,
+            exc_info=True,
+        )
+
+
 async def _handle_reset(chamado_id: int, sender: Optional[str]) -> None:
     """
     Processa o comando #reset: so para numeros de teste autorizados.
@@ -465,8 +520,20 @@ async def _handle_engine(
                 chamado_id
             )
 
+            # Correcao de rumo mid-jornada (US1, FASE 2, task 2.1.3): hidrata a
+            # pergunta de confirmacao/desambiguacao de troca de caminho pendente
+            # do turno anterior, para o motor interpretar a mensagem corrente
+            # EXCLUSIVAMENTE como resposta a essa pendencia (P-2).
+            context.troca_caminho_pendente = await _load_troca_pendente(chamado_id)
+
             # Processar com o motor conversacional
             flow_result = await engine.process(context.ticket_id, user_message, context)
+
+            # Correcao de rumo mid-jornada (US1, FASE 2, task 2.1.4): espelha em
+            # Redis o estado (possivelmente mutado pelo motor) de troca de
+            # caminho pendente — grava se setado, HDEL explicito se limpo (P-3).
+            # Independe do envio da mensagem (diferente do overflow).
+            await _persist_troca_pendente(chamado_id, context.troca_caminho_pendente)
 
             logger.info(
                 "webhook: motor processou chamado_id=%s action=%s caminho=%s etapa=%s",
@@ -510,6 +577,17 @@ async def _handle_engine(
             # Rastreabilidade aditiva (Onda 3, FASE 5 — US4/FR-018): ids dos
             # chunks recuperados (HybridRetriever) que embasaram a resposta.
             _turno_evt["fonte_ids"] = flow_result.fonte_ids
+            # Observabilidade aditiva (sdr-fluidez-intencao, FASE 5, US4 —
+            # FR-017/FR-018, contracts/turno-event-extensao.md): troca de
+            # caminho mid-jornada e reformulacao humanizada deste turno,
+            # quando acionadas. None quando o mecanismo correspondente nao
+            # rodou — log_turno OMITE o campo nesse caso (mesmo contrato
+            # aditivo dos campos acima, nunca quebra o schema das Ondas 1/2/3).
+            _turno_evt["troca_caminho_origem"] = flow_result.troca_caminho_origem
+            _turno_evt["troca_caminho_destino"] = flow_result.troca_caminho_destino
+            _turno_evt["troca_metodo"] = flow_result.troca_metodo
+            _turno_evt["troca_confianca"] = flow_result.troca_confianca
+            _turno_evt["reformulacao_variante"] = flow_result.reformulacao_variante
 
             # ---------------------------------------------------------------
             # 4. Persistir atualizacoes de estado
@@ -633,6 +711,11 @@ async def _handle_engine(
                         "fidelidade_afirmacoes_nao_sustentadas"
                     ),
                     fonte_ids=_turno_evt.get("fonte_ids"),
+                    troca_caminho_origem=_turno_evt.get("troca_caminho_origem"),
+                    troca_caminho_destino=_turno_evt.get("troca_caminho_destino"),
+                    troca_metodo=_turno_evt.get("troca_metodo"),
+                    troca_confianca=_turno_evt.get("troca_confianca"),
+                    reformulacao_variante=_turno_evt.get("reformulacao_variante"),
                 )
 
 

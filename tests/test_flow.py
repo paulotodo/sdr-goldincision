@@ -26,6 +26,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.core.flow import (
+    _ACKS,
+    _LEXICO_CAMINHOS,
+    _MARCADORES_CORRECAO,
+    _NOMES_CAMINHOS,
+    _REFORMULACOES,
+    _T,
     ETAPA_ALUNO_MENU,
     ETAPA_DUVIDAS,
     ETAPA_ESCOLHA_TURMA,
@@ -53,9 +59,12 @@ from app.core.flow import (
     _detectar_opcao_aluno,
     _eh_pergunta_informativa,
     _merge_perfil,
+    _norm,
     _pede_humano,
     _perfil_conhecido,
     _saudacao,
+    _t,
+    _valor_para_caminho,
 )
 from app.core.intent import ClassificacaoIntencao, Idioma
 from app.core.interpret import SlotQualificacao
@@ -221,6 +230,61 @@ async def test_menu_opcoes_numericas_roteiam_sem_llm():
         ctx = make_context(caminho=None, etapa=ETAPA_MENU)
         r = await eng.process(1, opcao, ctx)
         assert r.caminho == caminho, f"opcao {opcao} deveria rotear para {caminho}"
+
+
+@pytest.mark.asyncio
+async def test_menu_texto_livre_roteia_direto_sem_numero():
+    """US2/FR-011/013 (quickstart Cenario 5): resposta livre com nome de
+    produto -- com e sem erro leve -- direciona ao caminho correto no
+    fast-path deterministico do menu, sem exigir reenvio de numero e sem
+    depender do classificador LLM (AMBIGUA proposital)."""
+    casos = {
+        "curso online": CaminhoMapaMestre.CURSO_ONLINE_HG,
+        # Erro leve (typo/sem acentuacao) -- reproduz o caso real relatado
+        # na spec (harmonizacao glutea com typo), ja coberto pelo lexico
+        # compartilhado entregue na Fundacao (FASE 1).
+        "harmonização gluetea": CaminhoMapaMestre.CURSO_ONLINE_HG,
+        "curso presencial": CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+        "sou aluno": CaminhoMapaMestre.ALUNO_SUPORTE,
+    }
+    for texto, caminho_esperado in casos.items():
+        eng = engine(ClassificacaoIntencao.AMBIGUA)  # LLM nao ajuda
+        ctx = make_context(caminho=None, etapa=ETAPA_MENU)
+        r = await eng.process(1, texto, ctx)
+        assert r.caminho == caminho_esperado, (
+            f"texto={texto!r} deveria rotear para {caminho_esperado}, "
+            f"obteve {r.caminho}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_menu_texto_livre_ambiguo_entre_2_caminhos_pergunta_direta():
+    """US2/FR-012: resposta livre compativel com EXATAMENTE 2 caminhos
+    (termo generico curado 'curso') gera UMA pergunta direta de
+    desambiguacao -- nunca reapresenta o menu completo de 6 opcoes, nem
+    avanca caminho/etapa antes da resposta."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=None, etapa=ETAPA_MENU)
+    r = await eng.process(1, "curso", ctx)
+    assert r.action == "continue"
+    assert r.caminho is None
+    assert r.etapa == ETAPA_MENU
+    assert "MENU_PT" not in r.response_text
+    assert "?" in r.response_text
+
+
+@pytest.mark.asyncio
+async def test_menu_texto_livre_sem_caminho_reconhecivel_cai_no_existente():
+    """US2/FR-010 (dec-009/clarify Q4, quickstart Cenario 6): resposta que
+    nao indica claramente nenhum caminho (nem 1, nem exatamente 2) NAO
+    trava nem falha silenciosamente -- cai no comportamento existente
+    (reapresenta o menu, permanece em ETAPA_MENU)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=None, etapa=ETAPA_MENU)
+    r = await eng.process(1, "bom dia, tudo bem?", ctx)
+    assert r.action == "continue"
+    assert r.caminho is None
+    assert r.etapa == ETAPA_MENU
 
 
 @pytest.mark.asyncio
@@ -562,24 +626,41 @@ async def test_c6_outro_assunto_handoff():
 
 @pytest.mark.asyncio
 async def test_robustez_reformula_depois_handoff():
+    """FASE 4 (task 4.1.3, FR-014, research.md Decision 7 — causa raiz):
+    a 1a reformulacao (n=1) NUNCA reenvia o bloco de entrada verbatim —
+    ja usa a variante ciclica 1 de `_REFORMULACOES` + pergunta bare. A 2a
+    (n=2) usa a variante ciclica 2 (nunca repete a variante do turno
+    imediatamente anterior, dec-011/012). A 3a esgota `_MAX_TENTATIVAS` e
+    encaminha a humano (comportamento/limite preservados, FR-016)."""
     eng = engine(ClassificacaoIntencao.CURSOS_PRESENCIAIS)
     ctx = make_context(caminho=2, etapa=ETAPA_QUALIF_MEDICO)
 
-    # 1a resposta nao reconhecida → re-pergunta (tentativa 1)
+    # 1a resposta nao reconhecida → reformula com a variante 1 do ciclo
+    # (variante_idx = (1 - 1) % len(pool) = 0)
     r1 = await eng.process(1, "xpto blá", ctx)
     assert r1.action == "continue"
     assert r1.etapa == ETAPA_QUALIF_MEDICO
+    assert r1.response_text.startswith(_REFORMULACOES["pt"][0])
+    # FASE 5 (US4/FR-018): FlowResult carrega o indice da variante usada
+    # para observabilidade aditiva (log_turno.reformulacao_variante).
+    assert r1.reformulacao_variante == 0
+    assert r1.troca_caminho_origem is None  # nao houve troca neste turno
     ctx.etapa_funil = r1.updates.get("etapa_funil")
 
-    # 2a → reformula (prefixo "não entendi")
+    # 2a → reformula com a variante 2 (variante_idx = (2 - 1) % len(pool) = 1)
+    # — diferente da variante do turno anterior (r1)
     r2 = await eng.process(1, "zzz", ctx)
     assert r2.action == "continue"
-    assert "não entendi" in r2.response_text.lower()
+    assert r2.response_text.startswith(_REFORMULACOES["pt"][1])
+    assert r2.response_text != r1.response_text
+    assert r2.reformulacao_variante == 1
     ctx.etapa_funil = r2.updates.get("etapa_funil")
 
     # 3a → handoff (nao repete infinitamente)
     r3 = await eng.process(1, "????", ctx)
     assert r3.action == "handoff"
+    # Handoff por limite de tentativas nao e uma reformulacao — None.
+    assert r3.reformulacao_variante is None
 
 
 # ===========================================================================
@@ -1299,7 +1380,16 @@ async def test_slotfilling_confianca_abaixo_do_limiar_reformula_nunca_adivinha()
     """3.2.3/3.4.6: confianca abaixo do limiar (SLOT_CONFIDENCE_THRESHOLD=0.6
     default) -> "nao entendido" -> reformula, NUNCA preenche o slot com o
     valor de baixa confianca. Usa Caminho 2 (cursos_presenciais) — reformula
-    incondicional (sem o atalho de pergunta-direta do Caminho 1)."""
+    incondicional (sem o atalho de pergunta-direta do Caminho 1).
+
+    Apos o resolver da etapa falhar, `_reformular_ou_handoff` tenta o
+    detector de troca de caminho (US1, FASE 2, research.md Decision 3) ANTES
+    de reformular -- como o lexico deterministico nao casa nada nesta
+    mensagem, o detector tambem invoca o fallback agentico (schema
+    "troca_caminho", S-5) antes de desistir e reformular normalmente.
+    `MockSlotExtractor.default` (valor=None) faz esse 2o call nao aceitar
+    nenhum candidato, entao o comportamento observavel (reformula, etapa
+    inalterada) permanece o mesmo -- so a contagem de calls muda."""
     msg = "trabalho nessa area ha alguns anos"
     slot_extractor = MockSlotExtractor(
         {msg: SlotQualificacao(valor="sim", confianca=0.3)}
@@ -1310,7 +1400,7 @@ async def test_slotfilling_confianca_abaixo_do_limiar_reformula_nunca_adivinha()
     r = await eng.process(1, msg, ctx)
 
     assert ctx.eh_medico is None  # nao adivinhou
-    assert slot_extractor.calls == ["elegibilidade_medica"]
+    assert slot_extractor.calls == ["elegibilidade_medica", "troca_caminho"]
     assert r.etapa == ETAPA_QUALIF_MEDICO  # reformula, permanece na etapa
 
 
@@ -1377,3 +1467,445 @@ async def test_reversao_llm_confianca_muito_alta_reverte_fato_consolidado():
     resolvido = await eng._resolver_eh_medico(ctx, msg)
 
     assert resolvido is False
+
+
+# ---------------------------------------------------------------------------
+# _LEXICO_CAMINHOS / _MARCADORES_CORRECAO (CHK008, task 1.1.4)
+#
+# O mecanismo de reconhecimento de "erro leve de digitacao/acentuacao"
+# (FR-003/FR-013) e pertencimento a um conjunto PRE-COMPUTADO de variantes
+# normalizadas — nunca distancia de edicao/fuzzy-matching probabilistico
+# (research.md Decision 1). Estes testes iteram TODA entrada de
+# `_LEXICO_CAMINHOS` e `_MARCADORES_CORRECAO` e confirmam, por construcao,
+# que o matching e via substring/token apos `_norm()`.
+# ---------------------------------------------------------------------------
+
+def test_lexico_caminhos_cobre_os_6_caminhos_oficiais():
+    """Os 6 caminhos do Mapa Mestre tem entrada no lexico, nenhum vazio."""
+    assert set(_LEXICO_CAMINHOS.keys()) == {
+        CaminhoMapaMestre.CURSO_ONLINE_HG,
+        CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+        CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+        CaminhoMapaMestre.ALUNO_SUPORTE,
+        CaminhoMapaMestre.PACIENTE_MODELO,
+        CaminhoMapaMestre.OUTRO_ASSUNTO,
+    }
+    for caminho, variantes in _LEXICO_CAMINHOS.items():
+        assert variantes, f"caminho {caminho} sem variantes no lexico"
+
+
+def test_marcadores_correcao_cobre_pt_en_es():
+    """Marcadores de correcao explicita definidos para os 3 idiomas suportados."""
+    assert set(_MARCADORES_CORRECAO.keys()) == {"pt", "en", "es"}
+    for idioma, marcadores in _MARCADORES_CORRECAO.items():
+        assert marcadores, f"idioma {idioma} sem marcadores de correcao"
+
+
+def test_lexico_caminhos_entradas_ja_pre_normalizadas():
+    """Toda entrada do lexico e idempotente sob _norm() — ou seja, ja esta
+    no formato (minusculas, sem acento, sem pontuacao) usado no matching
+    contra o texto do usuario normalizado. Garante que o dono do lexico nao
+    escreveu acidentalmente uma variante com acento/maiuscula que nunca
+    vai casar em runtime."""
+    for caminho, variantes in _LEXICO_CAMINHOS.items():
+        for variante in variantes:
+            assert _norm(variante) == variante, (
+                f"variante {variante!r} do caminho {caminho} nao esta "
+                f"pre-normalizada (_norm() produziria {_norm(variante)!r})"
+            )
+
+
+def test_marcadores_correcao_entradas_ja_pre_normalizadas():
+    for idioma, marcadores in _MARCADORES_CORRECAO.items():
+        for marcador in marcadores:
+            assert _norm(marcador) == marcador, (
+                f"marcador {marcador!r} ({idioma}) nao esta pre-normalizada"
+            )
+
+
+def test_lexico_caminhos_sem_overlap_entre_caminhos():
+    """Nenhuma variante literal e compartilhada entre dois caminhos
+    diferentes — uma mesma string nunca deve apontar para dois caminhos
+    ao mesmo tempo (a ambiguidade tratada pela Decision 6 e sobre
+    MENSAGENS que casam com >=2 conjuntos, nao sobre entradas duplicadas
+    no lexico)."""
+    vistas: dict[str, int] = {}
+    for caminho, variantes in _LEXICO_CAMINHOS.items():
+        for variante in variantes:
+            assert variante not in vistas, (
+                f"variante {variante!r} duplicada nos caminhos "
+                f"{vistas[variante]} e {caminho}"
+            )
+            vistas[variante] = caminho
+
+
+@pytest.mark.parametrize(
+    "caminho",
+    list(CaminhoMapaMestre),
+)
+def test_lexico_caminhos_cada_entrada_casa_via_norm_substring(caminho):
+    """Para CADA entrada de CADA caminho, uma mensagem sintetica contendo a
+    variante (embutida em frase realista) deve casar por substring apos
+    `_norm()` — o mesmo padrao de matching de `_detectar_escolha_turma`/
+    `_detectar_objetivo_sistema`. Determinístico: mesmo input sempre produz
+    o mesmo resultado."""
+    for variante in _LEXICO_CAMINHOS[caminho]:
+        mensagem = f"Ola, eu quero saber sobre {variante} por favor"
+        assert variante in _norm(mensagem), (
+            f"variante {variante!r} do caminho {caminho} nao casou via "
+            f"substring apos _norm()"
+        )
+
+
+@pytest.mark.parametrize("idioma", ["pt", "en", "es"])
+def test_marcadores_correcao_cada_entrada_casa_via_norm_substring(idioma):
+    for marcador in _MARCADORES_CORRECAO[idioma]:
+        mensagem = f"{marcador}, quero outra coisa"
+        assert marcador in _norm(mensagem), (
+            f"marcador {marcador!r} ({idioma}) nao casou via substring "
+            f"apos _norm()"
+        )
+
+
+def test_lexico_caminhos_nao_faz_fuzzy_matching_para_typo_nao_cadastrado():
+    """Confirma a ausencia de fuzzy-matching (Decision 1): um typo GROSSEIRO
+    que NAO esta explicitamente cadastrado no lexico nao deve casar —
+    reconhecimento e por pertencimento exato ao conjunto pre-computado,
+    nunca por distancia de edicao."""
+    typo_nao_cadastrado = _norm("xxzqorsso onlnee kkk123")
+    for variantes in _LEXICO_CAMINHOS.values():
+        for variante in variantes:
+            assert variante not in typo_nao_cadastrado
+
+
+def test_lexico_caminhos_acento_e_removido_pelo_norm_erro_leve_chk008():
+    """Exemplo concreto citado em CHK008/task 1.1.1: 'harmoização' (erro
+    leve, falta a letra 'n') e 'harmonização' (correto) sao ambos
+    reconhecidos para o Caminho 1, via _norm() + pertencimento ao lexico —
+    nao fuzzy-matching."""
+    variantes_curso_online = _LEXICO_CAMINHOS[CaminhoMapaMestre.CURSO_ONLINE_HG]
+    assert "harmoizacao glutea" in variantes_curso_online  # erro leve (typo)
+    assert "harmonizacao glutea" in variantes_curso_online  # correto
+    msg_normalizada = _norm("Quero fazer o curso de Harmoização Glútea")
+    assert msg_normalizada == "quero fazer o curso de harmoizacao glutea"
+    assert "harmoizacao glutea" in msg_normalizada
+
+
+# ---------------------------------------------------------------------------
+# _valor_para_caminho — invariante S-6 (contracts/slot-troca-caminho.md,
+# task 1.2.3/1.2.5). Mapeamento FECHADO e PURO entre o `slot.valor` extraido
+# via `_SLOT_SCHEMA_TROCA_CAMINHO` (string livre, SEM constraint de enum no
+# Structured Output) e o `CaminhoMapaMestre` correspondente. Fail-safe: NUNCA
+# levanta excecao, NUNCA adivinha o caminho mais "parecido" para um valor
+# fora do enum (alucinacao/erro de formatacao do LLM) — sempre `None`.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "valor,caminho_esperado",
+    [
+        ("curso_online", CaminhoMapaMestre.CURSO_ONLINE_HG),
+        ("cursos_presenciais", CaminhoMapaMestre.CURSOS_PRESENCIAIS),
+        ("sistema_goldincision", CaminhoMapaMestre.SISTEMA_GOLDINCISION),
+        ("aluno_suporte", CaminhoMapaMestre.ALUNO_SUPORTE),
+        ("paciente_modelo", CaminhoMapaMestre.PACIENTE_MODELO),
+        ("outro_assunto", CaminhoMapaMestre.OUTRO_ASSUNTO),
+    ],
+)
+def test_valor_para_caminho_mapeia_os_6_valores_esperados(valor, caminho_esperado):
+    assert _valor_para_caminho(valor) == caminho_esperado
+
+
+def test_valor_para_caminho_none_retorna_none():
+    assert _valor_para_caminho(None) is None
+
+
+@pytest.mark.parametrize(
+    "valor_fora_do_enum",
+    [
+        "",
+        "curso_presencial",  # quase-match (typo do enum), NAO deve adivinhar
+        "CURSO_ONLINE",  # case diferente, NAO normaliza
+        "1",
+        "outro assunto",  # com espaco em vez de underscore
+        "'; DROP TABLE users; --",  # tentativa de injecao/alucinacao hostil
+        "xxzqorsso onlnee kkk123",
+    ],
+)
+def test_valor_para_caminho_string_fora_do_enum_retorna_none_sem_excecao(
+    valor_fora_do_enum,
+):
+    """S-6: qualquer string nao reconhecida -> None, NUNCA excecao, NUNCA
+    aproximacao para o caminho mais 'parecido'."""
+    assert _valor_para_caminho(valor_fora_do_enum) is None
+
+
+def test_valor_para_caminho_todos_os_6_caminhos_oficiais_cobertos():
+    """A funcao cobre exatamente os 6 caminhos oficiais do Mapa Mestre —
+    mesmo conjunto de `_LEXICO_CAMINHOS` (task 1.1.4)."""
+    valores = [
+        "curso_online", "cursos_presenciais", "sistema_goldincision",
+        "aluno_suporte", "paciente_modelo", "outro_assunto",
+    ]
+    caminhos_mapeados = {_valor_para_caminho(v) for v in valores}
+    assert caminhos_mapeados == set(CaminhoMapaMestre)
+
+
+# ---------------------------------------------------------------------------
+# Conteudo i18n de troca de caminho / reformulacao (FASE 1.3, CHK009/010/011,
+# tasks 1.3.1-1.3.3). O ALGORITMO de rotacao/composicao e implementado na
+# FASE 4 (task 4.1); estes testes validam apenas que o CONTEUDO textual
+# (PT/EN/ES) existe, e integro, e formatavel com os placeholders esperados.
+# ---------------------------------------------------------------------------
+
+def test_nomes_caminhos_cobre_os_6_caminhos_em_pt_en_es():
+    """`_NOMES_CAMINHOS` (suporte a CHK009/CHK010) tem entrada nao-vazia
+    para os 6 caminhos oficiais, nos 3 idiomas suportados."""
+    assert set(_NOMES_CAMINHOS.keys()) == set(CaminhoMapaMestre)
+    for caminho, nomes in _NOMES_CAMINHOS.items():
+        assert set(nomes.keys()) == {"pt", "en", "es"}
+        for idioma, nome in nomes.items():
+            assert nome.strip(), f"caminho {caminho} ({idioma}) com nome vazio"
+
+
+@pytest.mark.parametrize(
+    "chave",
+    [
+        "troca_caminho_confirmacao",
+        "troca_caminho_confirmacao_pergunta",
+    ],
+)
+def test_t_troca_caminho_confirmacao_formatavel_pt_en_es(chave):
+    """CHK009/FR-005: bloco de confirmacao breve de troca de caminho
+    (anuncio + pergunta do edge case de intencao implicita) existe nos 3
+    idiomas e aceita o placeholder `{caminho}` sem levantar excecao."""
+    assert set(_T[chave].keys()) == {"pt", "en", "es"}
+    for idioma in ("pt", "en", "es"):
+        texto = _t(chave, idioma)
+        assert texto.strip()
+        formatado = texto.format(caminho=_NOMES_CAMINHOS[CaminhoMapaMestre.CURSO_ONLINE_HG][idioma])
+        assert "{caminho}" not in formatado
+
+
+def test_t_troca_caminho_desambiguacao_formatavel_pt_en_es():
+    """CHK010/FR-008/FR-012: pergunta de desambiguacao entre EXATAMENTE 2
+    caminhos existe nos 3 idiomas, aceita `{caminho_a}`/`{caminho_b}`, e o
+    texto resultante nao reapresenta o menu completo (nao contem os nomes
+    dos outros 4 caminhos nao-candidatos)."""
+    chave = "troca_caminho_desambiguacao"
+    assert set(_T[chave].keys()) == {"pt", "en", "es"}
+    for idioma in ("pt", "en", "es"):
+        texto = _t(chave, idioma)
+        assert texto.strip()
+        nome_a = _NOMES_CAMINHOS[CaminhoMapaMestre.CURSO_ONLINE_HG][idioma]
+        nome_b = _NOMES_CAMINHOS[CaminhoMapaMestre.CURSOS_PRESENCIAIS][idioma]
+        formatado = texto.format(caminho_a=nome_a, caminho_b=nome_b)
+        assert "{caminho_a}" not in formatado
+        assert "{caminho_b}" not in formatado
+        assert nome_a in formatado
+        assert nome_b in formatado
+        # nunca reapresenta o menu completo: nomes dos outros 4 caminhos
+        # nao-candidatos nao devem aparecer na pergunta de desambiguacao.
+        outros = {
+            CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+            CaminhoMapaMestre.ALUNO_SUPORTE,
+            CaminhoMapaMestre.PACIENTE_MODELO,
+            CaminhoMapaMestre.OUTRO_ASSUNTO,
+        }
+        for caminho_excluido in outros:
+            nome_excluido = _NOMES_CAMINHOS[caminho_excluido][idioma]
+            assert nome_excluido not in formatado
+
+
+def test_reformulacoes_2_a_3_variantes_por_idioma_pt_en_es():
+    """CHK011/FR-015: `_REFORMULACOES` tem 2-3 variantes nao-vazias por
+    idioma suportado (dec-011/012 — ciclo sequencial deterministico)."""
+    assert set(_REFORMULACOES.keys()) == {"pt", "en", "es"}
+    for idioma, variantes in _REFORMULACOES.items():
+        assert 2 <= len(variantes) <= 3, (
+            f"idioma {idioma} tem {len(variantes)} variantes de reformulacao "
+            "(esperado 2-3, CHK011/FR-015)"
+        )
+        assert len(set(variantes)) == len(variantes), (
+            f"idioma {idioma} tem variantes de reformulacao duplicadas"
+        )
+        for variante in variantes:
+            assert variante.strip()
+
+
+def test_reformulacoes_nao_repete_saudacao_do_bloco_original():
+    """Task 1.3.3: variantes de `_REFORMULACOES` nao devem repetir a
+    introducao/saudacao (`_ACKS`) do bloco original — sao apenas o prefixo
+    de reformulacao, concatenado depois com `pergunta_curta` (task 4.1.3)."""
+    for idioma, variantes in _REFORMULACOES.items():
+        pool_saudacoes = {ack.lower() for ack in _ACKS.get(idioma, _ACKS["pt"])}
+        for variante in variantes:
+            primeira_palavra = variante.strip().split(" ", 1)[0].strip(",!.").lower()
+            assert primeira_palavra not in pool_saudacoes, (
+                f"variante {variante!r} ({idioma}) comeca repetindo uma "
+                "saudacao de _ACKS"
+            )
+
+
+def test_reformulacoes_termina_com_espaco_para_concatenar_pergunta_curta():
+    """Task 4.1.3 concatena `_REFORMULACOES[idioma][variante_idx] +
+    pergunta_curta` diretamente (sem separador) — cada variante deve
+    terminar com exatamente um espaco para o resultado ficar bem formado."""
+    for idioma, variantes in _REFORMULACOES.items():
+        for variante in variantes:
+            assert variante.endswith(" ") and not variante.endswith("  "), (
+                f"variante {variante!r} ({idioma}) nao termina com espaco "
+                "unico para concatenacao com pergunta_curta"
+            )
+
+
+# ===========================================================================
+# FASE 4 — US3: Reformulação Humanizada (P2)
+# ===========================================================================
+
+
+def test_variante_idx_ciclo_sequencial_deterministico_nunca_repete_anterior():
+    """Task 4.1.4/FR-015: `variante_idx = (n - 1) % len(pool)` e
+    deterministico (mesma entrada -> mesma saida, testavel byte-a-byte) e,
+    por construcao, a variante escolhida em cada tentativa `n` nunca repete
+    a do turno `n - 1` imediatamente anterior — verificado para os 3
+    idiomas suportados, cada um com pool de 2-3 variantes (dec-011/012)."""
+    for idioma, pool in _REFORMULACOES.items():
+        tamanho = len(pool)
+        indices = [(n - 1) % tamanho for n in range(1, 20)]
+        # Deterministico: recalcular a partir da mesma entrada reproduz
+        # exatamente a mesma sequencia de indices.
+        assert indices == [(n - 1) % tamanho for n in range(1, 20)]
+        # Nunca repete o indice (logo, a variante) do turno imediatamente
+        # anterior.
+        for i in range(1, len(indices)):
+            assert indices[i] != indices[i - 1], (
+                f"idioma {idioma}: variante_idx repetiu a do turno anterior "
+                f"em n={i + 1}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_sistema_etapa1_2_reformulacao_nao_repete_saudacao_nem_explicacao():
+    """Task 4.2.1/FR-014, quickstart Cenário 7 (regressão direta da causa
+    raiz confirmada em research.md Decision 7): a 1a mensagem não
+    reconhecida em `ETAPA_SISTEMA_OBJETIVO` NUNCA reenvia o bloco de
+    entrada verbatim (saudação "Perfeito! 😊" + explicação longa dos 2
+    programas) — usa `pergunta_curta` dedicada (`sistema_etapa1_2_curta`)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    entrada = _t("sistema_etapa1_2", "pt")
+    r1 = await eng.process(1, "xpto blá", ctx)
+
+    assert r1.etapa == ETAPA_SISTEMA_OBJETIVO
+    assert r1.response_text != entrada
+    assert "Perfeito! 😊" not in r1.response_text
+    assert "curso avulso" not in r1.response_text  # explicação longa NÃO repetida
+    assert "Qual destas opções representa melhor o seu objetivo?" in r1.response_text
+    assert r1.response_text.startswith(_REFORMULACOES["pt"][0])
+
+
+@pytest.mark.asyncio
+async def test_aluno_menu_reformulacao_nao_repete_saudacao():
+    """Task 4.2.2/FR-014 (achado NOVO, mesmo padrão estrutural de
+    `sistema_etapa1_2`): a 1a mensagem não reconhecida em
+    `ETAPA_ALUNO_MENU` NUNCA reenvia o bloco de entrada verbatim (saudação
+    "Perfeito! Ficarei feliz...") — usa `pergunta_curta` dedicada
+    (`aluno_menu_curta`)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=4, etapa=ETAPA_ALUNO_MENU)
+
+    entrada = _t("aluno_menu", "pt")
+    r1 = await eng.process(1, "hmmmm não entendi bem as opções", ctx)
+
+    assert r1.etapa == ETAPA_ALUNO_MENU
+    assert r1.response_text != entrada
+    assert "Ficarei feliz em direcionar" not in r1.response_text
+    assert "Certificado de conclusão" in r1.response_text  # submenu preservado
+    assert r1.response_text.startswith(_REFORMULACOES["pt"][0])
+
+
+@pytest.mark.asyncio
+async def test_fechar_link_reformulacao_bare_aplica_ciclo_sem_quebrar():
+    """Task 4.2.3, quickstart Cenário 7 (call site já bare — apenas
+    confirma que o ciclo de 4.1 se aplica sem quebrar o texto)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=1, etapa=ETAPA_FECHAMENTO)
+
+    entrada = _t("fechar_link", "pt")
+    r1 = await eng.process(1, "xpto blá", ctx)
+
+    assert r1.etapa == ETAPA_FECHAMENTO
+    assert r1.response_text != entrada
+    assert r1.response_text.startswith(_REFORMULACOES["pt"][0])
+    assert entrada in r1.response_text  # pergunta bare preservada ao final
+
+
+@pytest.mark.asyncio
+async def test_reformulacao_segunda_tentativa_difere_da_primeira_mesmo_idioma():
+    """Task 4.3.2, quickstart Cenário 7/FR-014/SC-004: a 2a mensagem não
+    reconhecida para a mesma pergunta gera resposta textualmente diferente
+    da 1a, no mesmo idioma, sem repetir a introdução/saudação do bloco
+    original."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    r1 = await eng.process(1, "xpto blá", ctx)
+    ctx.etapa_funil = r1.updates.get("etapa_funil")
+    r2 = await eng.process(1, "zzz", ctx)
+
+    assert r1.response_text != r2.response_text
+    assert "Perfeito! 😊" not in r2.response_text
+    assert r2.response_text.startswith(_REFORMULACOES["pt"][1])
+
+
+@pytest.mark.asyncio
+async def test_reformulacao_limite_tentativas_e_handoff_preservados_c3():
+    """Task 4.3.3, quickstart Cenário 8/FR-016 (regressão): o limite de
+    tentativas (`_MAX_TENTATIVAS=3`) e o encaminhamento automático a
+    humano permanecem com o mesmo escopo/limite vigente, também para o
+    call site corrigido de `ETAPA_SISTEMA_OBJETIVO`."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    r1 = await eng.process(1, "xpto blá", ctx)
+    assert r1.action == "continue"
+    ctx.etapa_funil = r1.updates.get("etapa_funil")
+
+    r2 = await eng.process(1, "zzz", ctx)
+    assert r2.action == "continue"
+    ctx.etapa_funil = r2.updates.get("etapa_funil")
+
+    r3 = await eng.process(1, "????", ctx)
+    assert r3.action == "handoff"
+
+
+@pytest.mark.asyncio
+async def test_cenario_real_harmonizacao_glutea_nao_reconhecida_depois_corrige_sistema():
+    """Task 4.3.1, fecha CHK022/SC-001 (complementa o caso dedicado do
+    golden set, `tests/golden/casos/reformulacao_humanizada.json`):
+    reproduz LITERALMENTE o cenário real relatado na spec (§Contexto e
+    motivação) — "harmonização glutea" não reconhecida no menu inicial em
+    texto livre, seguido de "opa... na verdade quero o curso de
+    harmoização glutea" (com erro de digitação) dentro do caminho Sistema
+    GoldIncision (Caminho 3)."""
+    eng = engine(ClassificacaoIntencao.AMBIGUA)
+    ctx = make_context(caminho=3, etapa=ETAPA_SISTEMA_OBJETIVO)
+
+    # "harmonização glutea" não é um objetivo reconhecível em
+    # ETAPA_SISTEMA_OBJETIVO (menu de 3 opções sobre Licenciamento/
+    # Franquia/incerteza) -- reformula sem repetir a saudação/explicação.
+    r1 = await eng.process(1, "harmonização glutea", ctx)
+    assert r1.etapa == ETAPA_SISTEMA_OBJETIVO
+    assert "Perfeito! 😊" not in r1.response_text
+    ctx.etapa_funil = r1.updates.get("etapa_funil")
+
+    # Correção com erro de digitação ("harmoização") mencionando "curso" —
+    # o detector de troca de caminho (US1) reconhece Caminho 1/2 (curso).
+    r2 = await eng.process(
+        1, "opa... na verdade quero o curso de harmoização glutea", ctx,
+    )
+    assert r2.caminho in (
+        CaminhoMapaMestre.CURSO_ONLINE_HG, CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+    )

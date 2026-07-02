@@ -1,0 +1,252 @@
+{
+  "casos": [
+    {
+      "id": "tc_cenario1_marcador_explicito_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "na verdade quero o curso presencial",
+      "estado_inicial": {
+        "caminho": 1, "etapa": "qualif_medico",
+        "eh_medico": true, "experiencia_corporal": false
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "etapa": "qualif_especialidade",
+        "contains": ["Cursos Presenciais HG", "especialidade médica"],
+        "nao_repetir_slot": {"eh_medico": true, "troca_caminho_pendente": null}
+      }
+    },
+    {
+      "id": "tc_cenario1_marcador_explicito_en",
+      "dimensao": "troca_caminho",
+      "mensagem": "actually I want the presential courses",
+      "estado_inicial": {
+        "caminho": 1, "etapa": "qualif_medico", "idioma": "en",
+        "eh_medico": true, "experiencia_corporal": false
+      },
+      "intent": {"intencao": "ambigua", "idioma": "en"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "etapa": "qualif_especialidade",
+        "contains": ["In-Person HG Courses", "medical specialty"],
+        "nao_repetir_slot": {"eh_medico": true, "troca_caminho_pendente": null}
+      }
+    },
+    {
+      "id": "tc_cenario1_marcador_explicito_es",
+      "dimensao": "troca_caminho",
+      "mensagem": "de hecho quiero cursos presenciales",
+      "estado_inicial": {
+        "caminho": 1, "etapa": "qualif_medico", "idioma": "es",
+        "eh_medico": true, "experiencia_corporal": false
+      },
+      "intent": {"intencao": "ambigua", "idioma": "es"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "etapa": "qualif_especialidade",
+        "contains": ["Cursos Presenciales HG", "especialidad médica"],
+        "nao_repetir_slot": {"eh_medico": true, "troca_caminho_pendente": null}
+      }
+    },
+    {
+      "id": "tc_cenario2_desambiguacao_turno1_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "curso",
+      "estado_inicial": {"caminho": 3, "etapa": "sistema_licenciamento"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 3,
+        "etapa": "sistema_licenciamento",
+        "contains": ["Curso Online HG", "Cursos Presenciais HG"],
+        "not_contains": ["outro assunto"]
+      }
+    },
+    {
+      "id": "tc_cenario2_desambiguacao_turno2_escolhe_online_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "online",
+      "estado_inicial": {
+        "caminho": 3, "etapa": "sistema_licenciamento",
+        "troca_caminho_pendente": {
+          "destinos": [1, 2], "origem": 3,
+          "metodo": "deterministico", "confianca": null, "tipo": "desambiguacao"
+        }
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 1,
+        "etapa": "qualif_medico",
+        "nao_repetir_slot": {"troca_caminho_pendente": null}
+      }
+    },
+    {
+      "id": "tc_cenario3_preserva_perfil_na_troca_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "na verdade quero o sistema goldincision",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "qualif_medico",
+        "eh_medico": true, "especialidade": "dermatologia", "idioma": "pt"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 3,
+        "etapa": "sistema_objetivo",
+        "nao_repetir_slot": {
+          "eh_medico": true, "especialidade": "dermatologia", "idioma": "pt"
+        }
+      }
+    },
+    {
+      "id": "tc_cenario4_resposta_legitima_nunca_desviada_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "dermatologia",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "qualif_especialidade",
+        "eh_medico": true, "experiencia_corporal": false
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "etapa": "escolha_turma",
+        "nao_repetir_slot": {
+          "especialidade": "dermatologia", "troca_caminho_pendente": null
+        }
+      }
+    },
+    {
+      "id": "tc_cenario9_confirmacao_sem_marcador_seta_pendente_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "quero saber mais sobre o curso online",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "qualif_especialidade",
+        "eh_medico": true, "experiencia_corporal": false
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "etapa": "qualif_especialidade",
+        "contains": ["Curso Online HG"],
+        "nao_repetir_slot": {
+          "troca_caminho_pendente": {
+            "destinos": [1], "origem": 2,
+            "metodo": "deterministico", "confianca": null, "tipo": "confirmacao"
+          }
+        }
+      }
+    },
+    {
+      "id": "tc_cenario9_confirmacao_aceita_despacha_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "sim",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "qualif_especialidade",
+        "eh_medico": true, "experiencia_corporal": false,
+        "troca_caminho_pendente": {
+          "destinos": [1], "origem": 2,
+          "metodo": "deterministico", "confianca": null, "tipo": "confirmacao"
+        }
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 1,
+        "nao_repetir_slot": {"troca_caminho_pendente": null}
+      }
+    },
+    {
+      "id": "tc_cenario9_confirmacao_negada_conta_tentativa_original_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "não",
+      "estado_inicial": {
+        "caminho": 2, "etapa": "qualif_especialidade",
+        "eh_medico": true, "experiencia_corporal": false,
+        "troca_caminho_pendente": {
+          "destinos": [1], "origem": 2,
+          "metodo": "deterministico", "confianca": null, "tipo": "confirmacao"
+        }
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "etapa": "qualif_especialidade",
+        "nao_repetir_slot": {"troca_caminho_pendente": null}
+      }
+    },
+    {
+      "id": "tc_cenario10_overflow_precedencia_total_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "na verdade quero o curso presencial",
+      "estado_inicial": {
+        "caminho": 3, "etapa": "sistema_licenciamento",
+        "overflow_blocos": ["Parte 2 do conteudo.", "Parte 3 do conteudo."],
+        "overflow_idioma": "pt"
+      },
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "handoff",
+        "caminho": 3,
+        "handoff_destino": "especialista",
+        "nao_repetir_slot": {"troca_caminho_pendente": null, "overflow_blocos": []}
+      }
+    },
+    {
+      "id": "tc_cenario11_mesmo_caminho_ativo_no_op_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "na verdade quero mesmo o curso online",
+      "estado_inicial": {"caminho": 1, "etapa": "fechamento", "eh_medico": true},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 1,
+        "etapa": "fechamento",
+        "nao_repetir_slot": {"troca_caminho_pendente": null}
+      }
+    },
+    {
+      "id": "tc_cenario12_retorno_caminho_visitado_reinicia_do_zero_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "na verdade quero cursos presenciais",
+      "estado_inicial": {"caminho": 1, "etapa": "qualif_medico"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "etapa": "qualif_medico",
+        "nao_repetir_slot": {"troca_caminho_pendente": null}
+      }
+    },
+    {
+      "id": "tc_antireg_fix9_sou_medico_nao_dispara_troca_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "sou medico",
+      "estado_inicial": {"caminho": 2, "etapa": "qualif_medico"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 2,
+        "nao_repetir_slot": {"eh_medico": true, "troca_caminho_pendente": null}
+      }
+    },
+    {
+      "id": "tc_antireg_fix9_numero_em_sistema_objetivo_nao_dispara_troca_pt",
+      "dimensao": "troca_caminho",
+      "mensagem": "1",
+      "estado_inicial": {"caminho": 3, "etapa": "sistema_objetivo"},
+      "intent": {"intencao": "ambigua", "idioma": "pt"},
+      "esperado": {
+        "proxima_acao": "continue",
+        "caminho": 3,
+        "nao_repetir_slot": {"troca_caminho_pendente": null}
+      }
+    }
+  ]
+}

@@ -286,6 +286,11 @@ def log_turno(
     fidelidade_fiel: Optional[bool] = None,
     fidelidade_afirmacoes_nao_sustentadas: Optional[list[str]] = None,
     fonte_ids: Optional[list[str]] = None,
+    troca_caminho_origem: Optional[int] = None,
+    troca_caminho_destino: Optional[int] = None,
+    troca_metodo: Optional[str] = None,
+    troca_confianca: Optional[float] = None,
+    reformulacao_variante: Optional[int] = None,
 ) -> None:
     """
     Registra evento estruturado de observabilidade de turno (US5, FR-015,
@@ -336,6 +341,28 @@ def log_turno(
       nunca reportados pelo LLM. None quando RAG nao foi acionado neste
       turno (fast-path/verbatim/sem duvida). Aditivo: nao contem texto
       livre, apenas ids — sem necessidade de scrubbing.
+    - `troca_caminho_origem`/`troca_caminho_destino` (FASE 5, US4/FR-017,
+      contracts/turno-event-extensao.md): caminho de origem/destino quando
+      uma troca de caminho mid-jornada foi despachada neste turno
+      (`FlowEngine._despachar_troca_caminho`). Sempre preenchidos JUNTOS
+      (ambos presentes ou ambos None — E-1); None quando nenhuma troca
+      ocorreu neste turno. Apenas metadados estruturados (indices de
+      `CaminhoMapaMestre`) — nunca texto livre, sem necessidade de
+      scrubbing (SEC-LLM-1).
+    - `troca_metodo` (FASE 5, US4/FR-017): `"deterministico"` (lexico) ou
+      `"assistido"` (fallback agentico via `SlotExtractor`, S-5). None
+      quando nenhuma troca ocorreu neste turno.
+    - `troca_confianca` (FASE 5, US4/FR-017): confianca (0..1) da
+      classificacao assistida — SO nao-nula quando `troca_metodo=
+      "assistido"` (E-2); `None` quando `troca_metodo="deterministico"`
+      (o lexico nao produz confianca fracionaria) ou quando nenhuma troca
+      ocorreu.
+    - `reformulacao_variante` (FASE 5, US4/FR-018): indice ciclico
+      (`(n-1) % len(pool)`) da variante de reformulacao humanizada
+      enviada neste turno (`FlowEngine._reformular_ou_handoff`, dec-011/
+      dec-012). None quando o turno nao envolveu reformulacao (resposta
+      compreendida de primeira, troca de caminho detectada em vez de
+      reformular, ou encaminhamento a humano por limite de tentativas).
     """
     if acao not in _TURNO_ACOES:
         logger.warning("log_turno: acao desconhecida %r (aceitas: %s)", acao, sorted(_TURNO_ACOES))
@@ -378,6 +405,21 @@ def log_turno(
         # Onda 3 (FASE 5, US4/FR-018): apenas ids (sem texto livre), aditivo,
         # junto do veredito de fidelidade (mesmo caminho aditivo acima).
         event["fonte_ids"] = fonte_ids
+    # --- Campos aditivos (FASE 5, US4 — sdr-fluidez-intencao, FR-017/FR-018):
+    # troca de caminho mid-jornada e reformulacao humanizada. Mesmo padrao
+    # aditivo acima — SO adicionados quando explicitamente passados,
+    # preservando o payload exato das Ondas 1/2/3 quando nao usados (ver
+    # docstring e tests/test_observability.py).
+    if troca_caminho_origem is not None:
+        event["troca_caminho_origem"] = troca_caminho_origem
+    if troca_caminho_destino is not None:
+        event["troca_caminho_destino"] = troca_caminho_destino
+    if troca_metodo is not None:
+        event["troca_metodo"] = troca_metodo
+    if troca_confianca is not None:
+        event["troca_confianca"] = troca_confianca
+    if reformulacao_variante is not None:
+        event["reformulacao_variante"] = reformulacao_variante
 
     _emit(event)
 

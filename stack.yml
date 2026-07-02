@@ -89,6 +89,10 @@ services:
       # Interpretacao Agentica / Slot-Filling (Pilar 8): limiar minimo de
       # confianca para aceitar um slot extraido pelo fallback agentico.
       SLOT_CONFIDENCE_THRESHOLD: "${SLOT_CONFIDENCE_THRESHOLD:-0.6}"
+      # Fluidez de Intencao / Troca de Caminho: limiar minimo de confianca
+      # para aceitar o slot "troca_caminho" do fallback agentico (so
+      # invocado quando o lexico deterministico nao reconhece a mensagem).
+      INTENT_SWITCH_CONFIDENCE_THRESHOLD: "${INTENT_SWITCH_CONFIDENCE_THRESHOLD:-0.6}"
       # RAG Hibrido (Onda 3): recuperacao ancorada com abstencao. Pre-condicao
       # de infraestrutura: imagem pgvector/pgvector:pg16 no servico postgres
       # (ver secao "Pre-condicao de merge/deploy" no PR) — ate la, o mecanismo

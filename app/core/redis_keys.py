@@ -44,6 +44,15 @@ ULTIMA_INTERACAO_FIELD = "ultima_interacao"      # epoch seconds (int) da ultima
 OVERFLOW_BLOCOS_FIELD = "overflow_blocos"        # JSON list[str] dos blocos ainda nao enviados
 OVERFLOW_IDIOMA_FIELD = "overflow_idioma"        # idioma do convite/overflow (pt|en|es)
 
+# Correcao de rumo mid-jornada (US1, FASE 2, task 2.1.1): quando o detector
+# centralizado em `_reformular_ou_handoff` encontra um candidato de troca de
+# caminho SEM marcador explicito (confirmacao) ou ambiguo entre EXATAMENTE 2
+# caminhos (desambiguacao), a pergunta correspondente fica pendente aqui ate
+# o proximo turno responder. Mesmo padrao de `OVERFLOW_BLOCOS_FIELD`/
+# `OVERFLOW_IDIOMA_FIELD`: JSON no hash, fail-open, limpo via HDEL explicito
+# (contracts/estado-troca-pendente.md).
+TROCA_PENDENTE_FIELD = "troca_pendente"          # JSON do estado de confirmacao/desambiguacao pendente
+
 
 def idemp_key(chamado_id: int, payload_hash: str) -> str:
     """

@@ -77,6 +77,43 @@ _CAMINHO_PARA_SLUG: dict[int, str | None] = {
     6: None,
 }
 
+# Nomes exibiveis (i18n) dos 6 caminhos do Mapa Mestre — conteudo de apoio
+# para os textos de confirmacao/desambiguacao de troca de caminho (FR-005,
+# FR-008/012, CHK009/CHK010). Usados para nomear o(s) caminho(s) candidato(s)
+# sem jamais reapresentar o menu completo de 6 opcoes.
+_NOMES_CAMINHOS: dict[int, dict[str, str]] = {
+    CaminhoMapaMestre.CURSO_ONLINE_HG: {
+        "pt": "o Curso Online HG",
+        "en": "the Online HG Course",
+        "es": "el Curso Online HG",
+    },
+    CaminhoMapaMestre.CURSOS_PRESENCIAIS: {
+        "pt": "os Cursos Presenciais HG",
+        "en": "the In-Person HG Courses",
+        "es": "los Cursos Presenciales HG",
+    },
+    CaminhoMapaMestre.SISTEMA_GOLDINCISION: {
+        "pt": "o Sistema GoldIncision (Licenciamento/Franquia)",
+        "en": "the GoldIncision System (Licensing/Franchise)",
+        "es": "el Sistema GoldIncision (Licencia/Franquicia)",
+    },
+    CaminhoMapaMestre.ALUNO_SUPORTE: {
+        "pt": "o suporte para alunos",
+        "en": "student support",
+        "es": "el soporte para alumnos",
+    },
+    CaminhoMapaMestre.PACIENTE_MODELO: {
+        "pt": "ser paciente modelo",
+        "en": "becoming a model patient",
+        "es": "ser paciente modelo",
+    },
+    CaminhoMapaMestre.OUTRO_ASSUNTO: {
+        "pt": "outro assunto",
+        "en": "another topic",
+        "es": "otro asunto",
+    },
+}
+
 # Sub-slugs dos presenciais (dentro do Caminho 2)
 _SLUG_HG_MODULO_1 = "hg-modulo-1"
 _SLUG_HG360_SP = "hg360-sp"
@@ -940,6 +977,32 @@ _T: dict[str, dict[str, str]] = {
             "mensaje — sigamos donde lo dejamos."
         ),
     },
+    # Fluidez agentica de intencao (FASE 1.3, CHK009/CHK010, FR-005/008/012).
+    # Confirmacao breve e natural quando a troca de caminho ja foi despachada
+    # (marcador explicito de correcao, sem pergunta intermediaria — task
+    # 2.2.4). Usa `{caminho}` (preenchido via `_NOMES_CAMINHOS`); NAO repete
+    # o menu completo (Principio IV — Comunicacao Consultiva Premium).
+    "troca_caminho_confirmacao": {
+        "pt": "Entendido! Vamos seguir então com {caminho}. 😊",
+        "en": "Got it! Let's move forward with {caminho}. 😊",
+        "es": "¡Entendido! Sigamos entonces con {caminho}. 😊",
+    },
+    # Pergunta curta de confirmacao para o edge case de intencao IMPLICITA
+    # (sem marcador explicito de correcao) — seta `troca_pendente`
+    # tipo="confirmacao" (task 2.2.5) em vez de trocar silenciosamente.
+    "troca_caminho_confirmacao_pergunta": {
+        "pt": "Notei que você quer falar sobre {caminho} — posso seguir por aí?",
+        "en": "I noticed you'd like to talk about {caminho} — should I go ahead with that?",
+        "es": "Noté que quieres hablar sobre {caminho} — ¿sigo por ahí?",
+    },
+    # Pergunta direta de desambiguacao entre EXATAMENTE 2 caminhos candidatos
+    # (FR-008/012, task 2.2.6/3.1.2) — usa `{caminho_a}`/`{caminho_b}`
+    # (`_NOMES_CAMINHOS`); NUNCA reapresenta o menu completo de 6 opcoes.
+    "troca_caminho_desambiguacao": {
+        "pt": "Só para direcionar certinho: você prefere {caminho_a} ou {caminho_b}?",
+        "en": "Just to point you in the right direction: would you prefer {caminho_a} or {caminho_b}?",
+        "es": "Solo para orientarte bien: ¿prefieres {caminho_a} o {caminho_b}?",
+    },
 }
 
 
@@ -954,6 +1017,41 @@ _ACKS = {
     "pt": ["Perfeito", "Ótimo", "Que bom", "Combinado", "Maravilha", "Excelente"],
     "en": ["Perfect", "Great", "Wonderful", "Got it", "Excellent", "Sounds good"],
     "es": ["Perfecto", "Genial", "Estupendo", "De acuerdo", "Maravilloso", "Excelente"],
+}
+
+# Variantes i18n do PREFIXO de reformulacao (FASE 1.3, CHK011, FR-014/015,
+# dec-011/012 — ciclo sequencial deterministico). Bloco DISTINTO de `_ACKS`
+# (aberturas de confirmacao) e do antigo prefixo unico `"nao_entendi"`.
+#
+# Selecao (FASE 4, task 4.1.2): `variante_idx = (n - 1) % len(pool)` — pelo
+# numero da tentativa, garante por construcao que a variante do turno
+# imediatamente anterior nunca se repete.
+# Composicao final (FASE 4, task 4.1.3): `_REFORMULACOES[idioma][variante_idx]
+# + pergunta_curta` — substitui o reenvio verbatim atual
+# (`_t("nao_entendi", idioma) + pergunta`, ver uso de "nao_entendi" acima).
+#
+# Cada variante: (1) NAO repete a introducao/saudacao do bloco original
+# (essa e responsabilidade de `_ACKS`/`_saudacao`); (2) faz referencia breve
+# e generica ao que o lead disse, quando cabivel, sem citar literalmente a
+# mensagem (evita concatenacao fragil de texto arbitrario do usuario dentro
+# do pool estatico); (3) termina com espaco unico para concatenar direto com
+# `pergunta_curta`.
+_REFORMULACOES: dict[str, list[str]] = {
+    "pt": [
+        "Deixa eu tentar explicar de um outro jeito: ",
+        "Sobre o que você comentou, vou reformular para ficar mais claro: ",
+        "Só para garantir que ficou claro, vou colocar de outra forma: ",
+    ],
+    "en": [
+        "Let me try explaining that a different way: ",
+        "About what you mentioned, let me rephrase to make it clearer: ",
+        "Just to make sure it's clear, let me put it another way: ",
+    ],
+    "es": [
+        "Déjame intentar explicarlo de otra manera: ",
+        "Sobre lo que comentaste, voy a reformularlo para que quede más claro: ",
+        "Solo para asegurarme de que quedó claro, lo pongo de otra forma: ",
+    ],
 }
 
 

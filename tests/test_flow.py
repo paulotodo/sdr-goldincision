@@ -26,8 +26,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.core.flow import (
+    _ACKS,
     _LEXICO_CAMINHOS,
     _MARCADORES_CORRECAO,
+    _NOMES_CAMINHOS,
+    _REFORMULACOES,
+    _T,
     ETAPA_ALUNO_MENU,
     ETAPA_DUVIDAS,
     ETAPA_ESCOLHA_TURMA,
@@ -59,6 +63,7 @@ from app.core.flow import (
     _pede_humano,
     _perfil_conhecido,
     _saudacao,
+    _t,
     _valor_para_caminho,
 )
 from app.core.intent import ClassificacaoIntencao, Idioma
@@ -1563,3 +1568,111 @@ def test_valor_para_caminho_todos_os_6_caminhos_oficiais_cobertos():
     ]
     caminhos_mapeados = {_valor_para_caminho(v) for v in valores}
     assert caminhos_mapeados == set(CaminhoMapaMestre)
+
+
+# ---------------------------------------------------------------------------
+# Conteudo i18n de troca de caminho / reformulacao (FASE 1.3, CHK009/010/011,
+# tasks 1.3.1-1.3.3). O ALGORITMO de rotacao/composicao e implementado na
+# FASE 4 (task 4.1); estes testes validam apenas que o CONTEUDO textual
+# (PT/EN/ES) existe, e integro, e formatavel com os placeholders esperados.
+# ---------------------------------------------------------------------------
+
+def test_nomes_caminhos_cobre_os_6_caminhos_em_pt_en_es():
+    """`_NOMES_CAMINHOS` (suporte a CHK009/CHK010) tem entrada nao-vazia
+    para os 6 caminhos oficiais, nos 3 idiomas suportados."""
+    assert set(_NOMES_CAMINHOS.keys()) == set(CaminhoMapaMestre)
+    for caminho, nomes in _NOMES_CAMINHOS.items():
+        assert set(nomes.keys()) == {"pt", "en", "es"}
+        for idioma, nome in nomes.items():
+            assert nome.strip(), f"caminho {caminho} ({idioma}) com nome vazio"
+
+
+@pytest.mark.parametrize(
+    "chave",
+    [
+        "troca_caminho_confirmacao",
+        "troca_caminho_confirmacao_pergunta",
+    ],
+)
+def test_t_troca_caminho_confirmacao_formatavel_pt_en_es(chave):
+    """CHK009/FR-005: bloco de confirmacao breve de troca de caminho
+    (anuncio + pergunta do edge case de intencao implicita) existe nos 3
+    idiomas e aceita o placeholder `{caminho}` sem levantar excecao."""
+    assert set(_T[chave].keys()) == {"pt", "en", "es"}
+    for idioma in ("pt", "en", "es"):
+        texto = _t(chave, idioma)
+        assert texto.strip()
+        formatado = texto.format(caminho=_NOMES_CAMINHOS[CaminhoMapaMestre.CURSO_ONLINE_HG][idioma])
+        assert "{caminho}" not in formatado
+
+
+def test_t_troca_caminho_desambiguacao_formatavel_pt_en_es():
+    """CHK010/FR-008/FR-012: pergunta de desambiguacao entre EXATAMENTE 2
+    caminhos existe nos 3 idiomas, aceita `{caminho_a}`/`{caminho_b}`, e o
+    texto resultante nao reapresenta o menu completo (nao contem os nomes
+    dos outros 4 caminhos nao-candidatos)."""
+    chave = "troca_caminho_desambiguacao"
+    assert set(_T[chave].keys()) == {"pt", "en", "es"}
+    for idioma in ("pt", "en", "es"):
+        texto = _t(chave, idioma)
+        assert texto.strip()
+        nome_a = _NOMES_CAMINHOS[CaminhoMapaMestre.CURSO_ONLINE_HG][idioma]
+        nome_b = _NOMES_CAMINHOS[CaminhoMapaMestre.CURSOS_PRESENCIAIS][idioma]
+        formatado = texto.format(caminho_a=nome_a, caminho_b=nome_b)
+        assert "{caminho_a}" not in formatado
+        assert "{caminho_b}" not in formatado
+        assert nome_a in formatado
+        assert nome_b in formatado
+        # nunca reapresenta o menu completo: nomes dos outros 4 caminhos
+        # nao-candidatos nao devem aparecer na pergunta de desambiguacao.
+        outros = {
+            CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+            CaminhoMapaMestre.ALUNO_SUPORTE,
+            CaminhoMapaMestre.PACIENTE_MODELO,
+            CaminhoMapaMestre.OUTRO_ASSUNTO,
+        }
+        for caminho_excluido in outros:
+            nome_excluido = _NOMES_CAMINHOS[caminho_excluido][idioma]
+            assert nome_excluido not in formatado
+
+
+def test_reformulacoes_2_a_3_variantes_por_idioma_pt_en_es():
+    """CHK011/FR-015: `_REFORMULACOES` tem 2-3 variantes nao-vazias por
+    idioma suportado (dec-011/012 — ciclo sequencial deterministico)."""
+    assert set(_REFORMULACOES.keys()) == {"pt", "en", "es"}
+    for idioma, variantes in _REFORMULACOES.items():
+        assert 2 <= len(variantes) <= 3, (
+            f"idioma {idioma} tem {len(variantes)} variantes de reformulacao "
+            "(esperado 2-3, CHK011/FR-015)"
+        )
+        assert len(set(variantes)) == len(variantes), (
+            f"idioma {idioma} tem variantes de reformulacao duplicadas"
+        )
+        for variante in variantes:
+            assert variante.strip()
+
+
+def test_reformulacoes_nao_repete_saudacao_do_bloco_original():
+    """Task 1.3.3: variantes de `_REFORMULACOES` nao devem repetir a
+    introducao/saudacao (`_ACKS`) do bloco original — sao apenas o prefixo
+    de reformulacao, concatenado depois com `pergunta_curta` (task 4.1.3)."""
+    for idioma, variantes in _REFORMULACOES.items():
+        pool_saudacoes = {ack.lower() for ack in _ACKS.get(idioma, _ACKS["pt"])}
+        for variante in variantes:
+            primeira_palavra = variante.strip().split(" ", 1)[0].strip(",!.").lower()
+            assert primeira_palavra not in pool_saudacoes, (
+                f"variante {variante!r} ({idioma}) comeca repetindo uma "
+                "saudacao de _ACKS"
+            )
+
+
+def test_reformulacoes_termina_com_espaco_para_concatenar_pergunta_curta():
+    """Task 4.1.3 concatena `_REFORMULACOES[idioma][variante_idx] +
+    pergunta_curta` diretamente (sem separador) — cada variante deve
+    terminar com exatamente um espaco para o resultado ficar bem formado."""
+    for idioma, variantes in _REFORMULACOES.items():
+        for variante in variantes:
+            assert variante.endswith(" ") and not variante.endswith("  "), (
+                f"variante {variante!r} ({idioma}) nao termina com espaco "
+                "unico para concatenacao com pergunta_curta"
+            )

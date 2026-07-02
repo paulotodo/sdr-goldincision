@@ -104,14 +104,31 @@ schemas definidos, conteúdo textual concreto ainda não redigido); Spec
 FR-005, FR-008, FR-015; Constitution Princípio IV (Comunicação Consultiva
 Premium)
 
-- [ ] 1.3.1 Redigir bloco i18n de confirmação breve e natural de troca de
+- [x] 1.3.1 Redigir bloco i18n de confirmação breve e natural de troca de
   caminho (PT/EN/ES) — CHK009, FR-005, tom alinhado ao Princípio IV
-- [ ] 1.3.2 Redigir texto de pergunta de desambiguação para os pares de
+  <!-- app/core/flow.py: _T["troca_caminho_confirmacao"] (anuncio pos-despacho,
+  task 2.2.4) + _T["troca_caminho_confirmacao_pergunta"] (edge case de
+  intencao implicita, task 2.2.5) + _NOMES_CAMINHOS (suporte, nomes exibiveis
+  dos 6 caminhos por idioma). Testes: tests/test_flow.py
+  test_t_troca_caminho_confirmacao_formatavel_pt_en_es,
+  test_nomes_caminhos_cobre_os_6_caminhos_em_pt_en_es. -->
+- [x] 1.3.2 Redigir texto de pergunta de desambiguação para os pares de
   caminhos plausivelmente ambíguos (PT/EN/ES) — CHK010, FR-008/012 (exatamente
   2 caminhos, nunca reapresentar o menu completo)
-- [ ] 1.3.3 Redigir 2-3 variantes de `_REFORMULACOES` por idioma (PT/EN/ES) —
+  <!-- app/core/flow.py: _T["troca_caminho_desambiguacao"] com placeholders
+  {caminho_a}/{caminho_b} (task 2.2.6/3.1.2). Teste:
+  tests/test_flow.py test_t_troca_caminho_desambiguacao_formatavel_pt_en_es
+  (inclui asserção de que os nomes dos outros 4 caminhos NAO aparecem no
+  texto — nunca reapresenta o menu completo). -->
+- [x] 1.3.3 Redigir 2-3 variantes de `_REFORMULACOES` por idioma (PT/EN/ES) —
   CHK011, FR-015; reservar espaço para referência breve ao que o lead disse
   quando possível, sem repetir a introdução/saudação do bloco original
+  <!-- app/core/flow.py: _REFORMULACOES: dict[str, list[str]] (3 variantes por
+  idioma), pool distinto de _ACKS e de "nao_entendi", conteudo pronto para a
+  composicao de FASE 4 (task 4.1.1/4.1.3). Testes: tests/test_flow.py
+  test_reformulacoes_2_a_3_variantes_por_idioma_pt_en_es,
+  test_reformulacoes_nao_repete_saudacao_do_bloco_original,
+  test_reformulacoes_termina_com_espaco_para_concatenar_pergunta_curta. -->
 
 ---
 

@@ -34,6 +34,7 @@ encaminhado.
 - Q: Quando o lead não confirma (nega, ignora ou responde algo não reconhecido) a pergunta de confirmação curta de troca de caminho, o sistema deve fazer o quê? → A: Não trocar de caminho; a tentativa de confirmação conta como uma tentativa não reconhecida da pergunta pendente original, sujeita ao mesmo limite/contador de tentativas já existente (coerente com FR-010/FR-016 — preserva escopo e limite vigentes de tentativas e o encaminhamento automático a humano).
 - Q: Enquanto uma conversa está com retomada pendente (interrompida por excesso de mensagens), uma mensagem do lead contendo marcador de correção explícito + produto claro deve ser tratada como o quê? → A: Ignorada para fins de troca de caminho até a retomada ser resolvida; toda mensagem nesse estado é tratada exclusivamente como resposta à retomada, mesmo contendo marcador explícito (FR-020 e o edge case de retomada dão prioridade à retomada sobre "qualquer nova detecção de troca de rumo", sem exceção documentada).
 - Q: Quando a resposta livre ao menu inicial for compatível com três ou mais caminhos (não apenas dois), o sistema deve fazer o quê? → A: Cair no comportamento existente de reformulação (tratar como não reconhecido), já que FR-012 restringe a desambiguação do menu inicial a exatamente dois caminhos; para 3+ caminhos vale o catch-all de FR-010 (reformulação/encaminhamento humano), sem estender FR-008 ao menu inicial.
+- Q: Qual estratégia deve escolher a variante de reformulação a cada nova tentativa, garantindo que nunca repita a variante do turno imediatamente anterior? → A: Ciclo sequencial determinístico por número da tentativa (tentativa 1 = variante 1, tentativa 2 = variante 2, reiniciando ao esgotar as variações disponíveis; por construção nunca repete a variante do turno imediatamente anterior). Escolha reprodutível e testável em conjunto de regressão (golden set) com o motor de reformulação real, em vez de seleção aleatória.
 
 ## User Scenarios & Testing
 
@@ -275,7 +276,11 @@ existentes.
   repetir a introdução/saudação do bloco original).
 - **FR-015**: As reformulações DEVEM ter ao menos 2 a 3 variações de texto
   por idioma suportado e, quando possível, fazer referência breve ao que o
-  lead disse.
+  lead disse. A seleção da variante a cada nova tentativa DEVE seguir um
+  ciclo sequencial determinístico pelo número da tentativa (tentativa 1 =
+  variação 1, tentativa 2 = variação 2, reiniciando o ciclo ao esgotar as
+  variações disponíveis), garantindo por construção que a variante do
+  turno imediatamente anterior nunca se repita.
 - **FR-016**: O comportamento existente de contagem de tentativas e
   encaminhamento automático a humano após o número máximo de tentativas
   DEVE permanecer com o mesmo escopo e limite já vigentes.

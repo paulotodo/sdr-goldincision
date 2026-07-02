@@ -482,12 +482,19 @@ Ref: quickstart.md Cenário 15 e §Verificação global; SC-007
 Ref: plan.md §Testing (baseline: 636 testes + golden 64, master `225b844`,
 produção `2.1.2`); quickstart.md §Verificação global
 
-- [ ] 7.1.1 `python3 -m pytest tests/ -q` verde — baseline 636 testes antes
+- [x] 7.1.1 `python3 -m pytest tests/ -q` verde — baseline 636 testes antes
   desta feature + todos os novos testes de unidade adicionados nas FASEs 1-6
-- [ ] 7.1.2 `ruff check app/ tests/` limpo
-- [ ] 7.1.3 Confirmar que Ondas 1/2/3 de `sdr-turnos-obs` e os fixes #16/#17
+  <!-- validado empiricamente onda-011 pos-FASE6: "730 passed, 1 skipped,
+  93 deselected, 7 warnings in 6.87s" -->
+- [x] 7.1.2 `ruff check app/ tests/` limpo
+  <!-- validado empiricamente onda-011: "All checks passed!" -->
+- [x] 7.1.3 Confirmar que Ondas 1/2/3 de `sdr-turnos-obs` e os fixes #16/#17
   (overflow-resume) permanecem preservados por construção (research.md
   Decision 5) — nenhuma regressão nos testes já existentes dessas features
+  <!-- validado empiricamente onda-011: pytest test_observability.py
+  test_turnos_contadores.py test_overflow_resume.py test_anti_pii_turno.py
+  test_fase4_seguranca_observabilidade.py -q = "116 passed in 1.03s";
+  suite completa verde (7.1.1) cobre o restante por inclusao. -->
 
 ### 7.2 Validação manual real `[M]`
 
@@ -496,6 +503,11 @@ Ref: quickstart.md §Verificação global
 - [ ] 7.2.1 Validação real via WhatsApp (`#reset`, número autorizado)
   reproduzindo o caso real relatado na spec (§Contexto e motivação),
   confirmando que a correção de rumo funciona ponta a ponta em produção-like
+  <!-- PENDENTE-HUMANO onda-011: NAO executavel por agente (exige WhatsApp
+  real + numero autorizado). Documentado no relatorio final como validacao
+  manual pos-entrega a cargo do operador. Todas as evidencias automatizadas
+  equivalentes (golden com transcript real do bug, EN/ES, fix #9) verdes. -->
+
 
 ---
 

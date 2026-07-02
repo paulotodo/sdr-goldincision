@@ -135,6 +135,22 @@ _SLOT_SCHEMA_ESCOLHA_TURMA = {
     ),
     "valores_esperados": ["sp", "barcelona"],
 }
+# Fluidez de intencao (FR-002/003/004, contracts/slot-troca-caminho.md):
+# fallback agentico confidence-gated para deteccao de troca de caminho,
+# invocado SOMENTE quando `_LEXICO_CAMINHOS`/`_MARCADORES_CORRECAO`
+# (fast-path deterministico, acima) nao encontram correspondencia (S-5).
+_SLOT_SCHEMA_TROCA_CAMINHO = {
+    "nome": "troca_caminho",
+    "descricao": (
+        "O lead esta corrigindo o rumo da conversa e indicando que quer "
+        "outro caminho/produto diferente do caminho ativo. Extraia qual "
+        "caminho ele quer, se identificavel."
+    ),
+    "valores_esperados": [
+        "curso_online", "cursos_presenciais", "sistema_goldincision",
+        "aluno_suporte", "paciente_modelo", "outro_assunto",
+    ],
+}
 
 # ---------------------------------------------------------------------------
 # Etapas finas por caminho (estado da maquina, persistido em ticket.etapa)
@@ -325,6 +341,40 @@ _MARCADORES_CORRECAO: dict[str, set[str]] = {
         "mejor dicho", "quiero decir",
     },
 }
+
+# Mapeamento FECHADO entre os `valores_esperados` de
+# `_SLOT_SCHEMA_TROCA_CAMINHO` (string livre extraida pelo LLM) e os 6
+# caminhos oficiais do Mapa Mestre. Usado exclusivamente por
+# `_valor_para_caminho()` abaixo.
+_VALOR_SLOT_TROCA_PARA_CAMINHO: dict[str, int] = {
+    "curso_online": CaminhoMapaMestre.CURSO_ONLINE_HG,
+    "cursos_presenciais": CaminhoMapaMestre.CURSOS_PRESENCIAIS,
+    "sistema_goldincision": CaminhoMapaMestre.SISTEMA_GOLDINCISION,
+    "aluno_suporte": CaminhoMapaMestre.ALUNO_SUPORTE,
+    "paciente_modelo": CaminhoMapaMestre.PACIENTE_MODELO,
+    "outro_assunto": CaminhoMapaMestre.OUTRO_ASSUNTO,
+}
+
+
+def _valor_para_caminho(valor: Optional[str]) -> Optional[int]:
+    """Mapeia o `slot.valor` extraido via `_SLOT_SCHEMA_TROCA_CAMINHO`
+    (contracts/slot-troca-caminho.md) para o `CaminhoMapaMestre`
+    correspondente.
+
+    Invariante **S-6** (achado do gate `owasp-security`): `SlotQualificacao
+    .valor` e `Optional[str]` SEM constraint de enum no nivel do Pydantic —
+    `valores_esperados` so orienta o PROMPT, nao e validado estruturalmente
+    pelo Structured Output. Logo `valor` PODE, em tese, conter uma string
+    fora dos 6 valores esperados (alucinacao/erro de formatacao do LLM).
+    Esta funcao e um mapeamento FECHADO e PURA (sem chamada de rede): nunca
+    levanta excecao, nunca adivinha o caminho mais "parecido" — qualquer
+    `None` ou string nao reconhecida retorna `None` (equivalente a
+    `SlotExtractor.aceitar()` ter rejeitado, cai no comportamento existente
+    de reformulacao, FR-010).
+    """
+    if valor is None:
+        return None
+    return _VALOR_SLOT_TROCA_PARA_CAMINHO.get(valor)
 
 
 # ---------------------------------------------------------------------------

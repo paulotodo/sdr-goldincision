@@ -59,6 +59,7 @@ from app.core.flow import (
     _pede_humano,
     _perfil_conhecido,
     _saudacao,
+    _valor_para_caminho,
 )
 from app.core.intent import ClassificacaoIntencao, Idioma
 from app.core.interpret import SlotQualificacao
@@ -1502,3 +1503,63 @@ def test_lexico_caminhos_acento_e_removido_pelo_norm_erro_leve_chk008():
     msg_normalizada = _norm("Quero fazer o curso de Harmoização Glútea")
     assert msg_normalizada == "quero fazer o curso de harmoizacao glutea"
     assert "harmoizacao glutea" in msg_normalizada
+
+
+# ---------------------------------------------------------------------------
+# _valor_para_caminho — invariante S-6 (contracts/slot-troca-caminho.md,
+# task 1.2.3/1.2.5). Mapeamento FECHADO e PURO entre o `slot.valor` extraido
+# via `_SLOT_SCHEMA_TROCA_CAMINHO` (string livre, SEM constraint de enum no
+# Structured Output) e o `CaminhoMapaMestre` correspondente. Fail-safe: NUNCA
+# levanta excecao, NUNCA adivinha o caminho mais "parecido" para um valor
+# fora do enum (alucinacao/erro de formatacao do LLM) — sempre `None`.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "valor,caminho_esperado",
+    [
+        ("curso_online", CaminhoMapaMestre.CURSO_ONLINE_HG),
+        ("cursos_presenciais", CaminhoMapaMestre.CURSOS_PRESENCIAIS),
+        ("sistema_goldincision", CaminhoMapaMestre.SISTEMA_GOLDINCISION),
+        ("aluno_suporte", CaminhoMapaMestre.ALUNO_SUPORTE),
+        ("paciente_modelo", CaminhoMapaMestre.PACIENTE_MODELO),
+        ("outro_assunto", CaminhoMapaMestre.OUTRO_ASSUNTO),
+    ],
+)
+def test_valor_para_caminho_mapeia_os_6_valores_esperados(valor, caminho_esperado):
+    assert _valor_para_caminho(valor) == caminho_esperado
+
+
+def test_valor_para_caminho_none_retorna_none():
+    assert _valor_para_caminho(None) is None
+
+
+@pytest.mark.parametrize(
+    "valor_fora_do_enum",
+    [
+        "",
+        "curso_presencial",  # quase-match (typo do enum), NAO deve adivinhar
+        "CURSO_ONLINE",  # case diferente, NAO normaliza
+        "1",
+        "outro assunto",  # com espaco em vez de underscore
+        "'; DROP TABLE users; --",  # tentativa de injecao/alucinacao hostil
+        "xxzqorsso onlnee kkk123",
+    ],
+)
+def test_valor_para_caminho_string_fora_do_enum_retorna_none_sem_excecao(
+    valor_fora_do_enum,
+):
+    """S-6: qualquer string nao reconhecida -> None, NUNCA excecao, NUNCA
+    aproximacao para o caminho mais 'parecido'."""
+    assert _valor_para_caminho(valor_fora_do_enum) is None
+
+
+def test_valor_para_caminho_todos_os_6_caminhos_oficiais_cobertos():
+    """A funcao cobre exatamente os 6 caminhos oficiais do Mapa Mestre —
+    mesmo conjunto de `_LEXICO_CAMINHOS` (task 1.1.4)."""
+    valores = [
+        "curso_online", "cursos_presenciais", "sistema_goldincision",
+        "aluno_suporte", "paciente_modelo", "outro_assunto",
+    ]
+    caminhos_mapeados = {_valor_para_caminho(v) for v in valores}
+    assert caminhos_mapeados == set(CaminhoMapaMestre)

@@ -64,23 +64,38 @@ Rígida)
   <!-- entregue junto com 1.1 (mesma onda) para evitar duplicar o mesmo
   conteudo em dois passos — ver nota DRY em 1.1.1. Constantes inseridas
   logo apos `_destino_logico_por_caminho()`, antes do bloco i18n `_T`. -->
-- [ ] 1.2.2 Criar `_SLOT_SCHEMA_TROCA_CAMINHO` em `app/core/interpret.py`
+- [x] 1.2.2 Criar `_SLOT_SCHEMA_TROCA_CAMINHO` em `app/core/interpret.py`
   conforme `contracts/slot-troca-caminho.md` — reusar `SlotExtractor`, NÃO
   tocar `app/core/intent.py`/`IntentClassifier.classify()` (contrato de
   2-tupla protegido por gotcha)
-- [ ] 1.2.3 Implementar `_valor_para_caminho(valor: str | None) -> int |
+  <!-- DESVIO EMPÍRICO do local literal do contrato: entregue em
+  `app/core/flow.py` (nao interpret.py), junto dos demais 5
+  `_SLOT_SCHEMA_*` ja existentes (linhas 94-137) — mesmo padrao do
+  projeto. Motivo tecnico: `app/core/flow.py:41` ja importa
+  `SlotExtractor`/`permitir_reversao` de `interpret.py`; um import
+  reverso (interpret.py -> flow.py, necessario para `_valor_para_caminho`
+  referenciar `CaminhoMapaMestre`) criaria import circular. Ver Decisao
+  registrada na onda-005 (dec sobre "local de _SLOT_SCHEMA_TROCA_CAMINHO
+  e _valor_para_caminho"). -->
+- [x] 1.2.3 Implementar `_valor_para_caminho(valor: str | None) -> int |
   None` como função pura de mapeamento FECHADO (`dict.get(valor, None)` ou
   `match` exaustivo com `case _: return None`) — invariante **S-6**: nunca
   levanta exceção, nunca adivinha o caminho mais "parecido" para um valor
   fora do enum (achado do gate `owasp-security`)
-- [ ] 1.2.4 Adicionar `INTENT_SWITCH_CONFIDENCE_THRESHOLD` (pydantic-settings,
+  <!-- entregue em app/core/flow.py (mesmo motivo de import circular
+  documentado em 1.2.2); dict.get() fechado + None-safe. -->
+- [x] 1.2.4 Adicionar `INTENT_SWITCH_CONFIDENCE_THRESHOLD` (pydantic-settings,
   default `0.6`) em `app/config.py`, `.env.example` e `stack.yml`
-- [ ] 1.2.5 Escrever testes de unidade para `_valor_para_caminho` cobrindo os
+- [x] 1.2.5 Escrever testes de unidade para `_valor_para_caminho` cobrindo os
   6 valores válidos de `valores_esperados` + `None` + string arbitrária fora
   do enum (garante S-6 — nunca propaga exceção nem alucina)
-- [ ] 1.2.6 Escrever teste de unidade confirmando `SlotExtractor.aceitar()`
+  <!-- tests/test_flow.py — inclui payload hostil ("'; DROP TABLE...")
+  validando S-6 contra tentativa de injecao/alucinacao. -->
+- [x] 1.2.6 Escrever teste de unidade confirmando `SlotExtractor.aceitar()`
   só aceita quando `valor is not None AND confianca >=
   settings.intent_switch_confidence_threshold` (S-1/S-2)
+  <!-- tests/test_interpret.py — cobre default, override via env e
+  valor=None sempre rejeita mesmo com confianca=1.0. -->
 
 ### 1.3 Fechar gaps de checklist CHK009/CHK010/CHK011 — conteúdo i18n pendente `[M]`
 

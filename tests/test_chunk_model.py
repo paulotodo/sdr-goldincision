@@ -89,6 +89,27 @@ def test_chunk_unique_fonte_permite_mesmo_fonte_id_idioma_diferente(session):
     assert session.query(Chunk).count() == 2
 
 
+def test_chunk_conteudo_hash_preenchido_automaticamente(session):
+    """`conteudo_hash` e populado no before_insert (models.py) a partir do texto."""
+    from app.repository.models import chunk_conteudo_hash
+
+    c = _novo_chunk(fonte_id=500, conteudo="Texto oficial X")
+    session.add(c)
+    session.commit()
+    assert c.conteudo_hash == chunk_conteudo_hash("Texto oficial X")
+
+
+def test_chunk_unique_conteudo_rejeita_mesmo_conteudo_mesma_fonte_idioma(session):
+    """UNIQUE(fonte_tabela, idioma, conteudo_hash): mesmo conteudo na mesma
+    fonte/idioma e rejeitado mesmo com `fonte_id` diferente (identidade por
+    conteudo — evita o churn: re-seed com id novo NAO duplica o chunk)."""
+    session.add(_novo_chunk(fonte_tabela="faq", fonte_id=1, idioma="pt", conteudo="mesma coisa"))
+    with pytest.raises(IntegrityError):
+        session.add(_novo_chunk(fonte_tabela="faq", fonte_id=2, idioma="pt", conteudo="mesma coisa"))
+        session.commit()
+    session.rollback()
+
+
 def test_chunk_tipo_invalido_rejeitado(session):
     """CHECK tipo IN ('objecao','faq','base') rejeita valor fora do enum."""
     session.add(_novo_chunk(tipo="invalido"))

@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -36,6 +37,7 @@ from app.repository.models import (
     CursoObjecao,
     CursoTurma,
     NumeroTeste,
+    chunk_conteudo_hash,
 )
 from app.schemas.curso import (
     CursoCreate,
@@ -803,9 +805,27 @@ async def criar_chunk(
             fonte_tabela="admin",
             fonte_id=0,  # placeholder — corrigido para o proprio id logo abaixo
             ativo=True,
-        )
+        )  # `conteudo_hash` populado no before_insert (models.py)
         db.add(novo)
-        await db.flush()  # obtem novo.id (sequence)
+        try:
+            await db.flush()  # obtem novo.id (sequence)
+        except IntegrityError:
+            # conteudo `base` identico ja curado (uq_chunk_conteudo) — idempotente:
+            # retorna o chunk existente em vez de duplicar.
+            await db.rollback()
+            h = chunk_conteudo_hash(payload.conteudo)
+            existente = (
+                await db.execute(
+                    select(Chunk).where(
+                        Chunk.fonte_tabela == "admin",
+                        Chunk.idioma == payload.idioma,
+                        Chunk.conteudo_hash == h,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existente is not None:
+                return _chunk_to_dict(existente)
+            raise
         novo.fonte_id = novo.id  # fonte_id = <id autoincrementado do proprio chunk>
         await db.commit()
         await db.refresh(novo)

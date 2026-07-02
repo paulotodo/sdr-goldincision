@@ -4,28 +4,27 @@ calculo de embeddings pendentes (RAG hibrido, Onda 3 — FR-009, FR-010,
 FR-023-INFRA-IDEMP; `research.md` Decision 9; `data-model.md` §1).
 
 Fluxo de `run_rag_seed(db_session, openai_client)`:
-  1. Upsert de `chunk` (tipo='objecao'/'faq') a partir de `CursoObjecao`/
-     `Faq` ativos, via `INSERT ... ON CONFLICT (fonte_tabela, fonte_id,
-     idioma) DO UPDATE ... WHERE chunk.conteudo IS DISTINCT FROM
-     EXCLUDED.conteudo RETURNING id` — so retorna as linhas cujo conteudo
-     REALMENTE mudou (o Postgres nao inclui no RETURNING as linhas cujo
-     WHERE do DO UPDATE avaliou falso, ou seja, conteudo inalterado = nop
-     silencioso, sem invalidar o embedding existente).
-  2. Reconciliacao de `ativo` (tombstoning): para `curso_objecao`/`faq`,
-     desativa (`ativo=False`) chunks orfaos — cuja fonte foi removida (ambas)
-     ou marcada `ativo=False` (so `faq`, que tem essa coluna) — e reativa os
-     vigentes. Sem isto, um upsert-only deixaria conteudo que saiu da Base
-     Oficial ainda recuperavel (violacao anti-alucinacao).
-  3. Candidatos a (re)embedding = linhas retornadas (novas OU alteradas)
-     UNIAO TODO chunk ATIVO com `embedding IS NULL` — de QUALQUER fonte,
-     inclusive `admin` (chunks `tipo='base'` curados via `/admin/chunks`,
-     que gravam `embedding IS NULL` e delegam o calculo a este seed) e
-     recovery de boot interrompido.
+  1. Upsert de `chunk` (tipo='objecao'/'faq') a partir de `CursoObjecao`/`Faq`,
+     chaveado por CONTEUDO — `INSERT ... ON CONFLICT (fonte_tabela, idioma,
+     conteudo_hash) DO UPDATE SET fonte_id, curso_id, ativo`. Conteudo
+     INALTERADO => conflito => atualiza so a proveniencia (o `fonte_id` muda a
+     cada re-seed, pois o `run_seed` faz delete+insert de faq/objecao), SEM
+     tocar `conteudo`/`embedding`: mesmo chunk (mesmo id e embedding) entre
+     boots, sem churn nem recomputo (FR-009). Conteudo NOVO => INSERT com
+     `embedding IS NULL`.
+  2. Purga de orfaos por conteudo: chunks de `curso_objecao`/`faq` cujo
+     `conteudo_hash` saiu do conjunto vigente da origem (fonte deletada,
+     editada, ou FAQ desativada) sao REMOVIDOS — mantem a tabela limitada e a
+     recuperacao ancorada so na Base Oficial vigente (anti-alucinacao). `admin`
+     nao e tocado (curadoria manual; remocao so via DELETE /admin/chunks).
+  3. Candidatos a embedding = TODO chunk ATIVO com `embedding IS NULL` — de
+     QUALQUER fonte, inclusive `admin` (`tipo='base'` curado via `/admin/chunks`,
+     que grava `embedding IS NULL` e delega o calculo a este seed) e recovery de
+     boot interrompido. Conteudo inalterado ja tem embedding => nao entra aqui.
   4. Embeddings calculados em lotes de no maximo 100 textos por chamada a
      `OpenAIClient.embed()` (dec-020 finding #2, API4/LLM10 Unbounded
      Consumption, `checklists/requirements.md` CHK035) — representacao
-     semantica calculada 1x, NUNCA recomputada a cada boot para conteudo
-     inalterado (FR-009).
+     semantica calculada 1x, NUNCA recomputada a cada boot (FR-009).
 
 Curadoria do TEXTO de `tipo='base'` (Decision 2) e feita via `/admin/chunks`
 (app/api/admin.py, FASE 3) — upsert direto, fora deste modulo; o EMBEDDING
@@ -42,10 +41,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.repository.models import Chunk, CursoObjecao, Faq
+from app.repository.models import Chunk, CursoObjecao, Faq, chunk_conteudo_hash
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,15 +59,19 @@ EMBED_BATCH_SIZE = 100
 
 async def _upsert_chunks_from_rows(
     session: "AsyncSession", rows: list[dict]
-) -> set[int]:
+) -> None:
     """
-    Upsert em lote de `chunk`s de UMA fonte (curso_objecao|faq).
+    Upsert em lote de `chunk`s de UMA fonte (curso_objecao|faq), chaveado por
+    CONTEUDO (`uq_chunk_conteudo` = fonte_tabela+idioma+conteudo_hash), NAO pelo
+    `fonte_id` volatil. Conflito == mesmo conteudo => DO UPDATE apenas da
+    proveniencia (`fonte_id`/`curso_id`) e `ativo`; `conteudo` e `embedding`
+    NAO sao tocados (embedding preservado => sem recomputo, FR-009). Conteudo
+    novo => INSERT com `embedding IS NULL` (sera embedado no passo seguinte).
 
-    Retorna o conjunto de ids inseridos/atualizados de fato (candidatos a
-    (re)embedding) — linhas cujo conteudo nao mudou nao aparecem aqui
-    (RETURNING nao as inclui quando o WHERE do DO UPDATE avalia falso).
+    Idempotencia real entre boots: como o run_seed re-cria faq/objecao com ids
+    novos, o `fonte_id` muda mas o `conteudo_hash` nao — o chunk (e seu id e
+    embedding) e preservado; nada de churn.
     """
-    changed_ids: set[int] = set()
     for row in rows:
         stmt = (
             pg_insert(Chunk)
@@ -77,26 +80,43 @@ async def _upsert_chunks_from_rows(
                 tipo=row["tipo"],
                 idioma=row["idioma"],
                 conteudo=row["conteudo"],
+                conteudo_hash=row["conteudo_hash"],
                 fonte_tabela=row["fonte_tabela"],
                 fonte_id=row["fonte_id"],
                 ativo=True,
             )
             .on_conflict_do_update(
-                constraint="uq_chunk_fonte",
+                constraint="uq_chunk_conteudo",
                 set_={
-                    "conteudo": row["conteudo"],
                     "curso_id": row["curso_id"],
+                    "fonte_id": row["fonte_id"],
                     "ativo": True,
                 },
-                where=(Chunk.conteudo != row["conteudo"]),
             )
-            .returning(Chunk.id)
         )
-        result = await session.execute(stmt)
-        row_id = result.scalar_one_or_none()
-        if row_id is not None:
-            changed_ids.add(row_id)
-    return changed_ids
+        await session.execute(stmt)
+
+
+async def _purge_orfaos(
+    session: "AsyncSession", fonte_tabela: str, hashes_vigentes: set[str]
+) -> int:
+    """
+    Remove (DELETE) chunks de uma fonte sincronizada (`curso_objecao`/`faq`)
+    cujo `conteudo_hash` nao esta mais no conjunto vigente da origem — conteudo
+    que saiu da Base Oficial (fonte deletada, editada, ou FAQ desativada).
+    Mantem a tabela LIMITADA (sem acumulo de mortos) e a recuperacao ancorada
+    apenas na base vigente (anti-alucinacao). NAO toca `fonte_tabela='admin'`
+    (curadoria manual — removida so via DELETE /admin/chunks).
+    """
+    stmt = delete(Chunk).where(
+        Chunk.fonte_tabela == fonte_tabela,
+        Chunk.conteudo_hash.notin_(sorted(hashes_vigentes)),
+    )
+    result = await session.execute(stmt)
+    n = getattr(result, "rowcount", 0) or 0
+    if n:
+        logger.info("rag_seed: %d chunk(s) orfao(s) removido(s) de %s", n, fonte_tabela)
+    return n
 
 
 async def _pendentes_embedding(session: "AsyncSession", fonte_tabela: str) -> set[int]:
@@ -123,32 +143,6 @@ async def _pendentes_embedding_todos(session: "AsyncSession") -> set[int]:
         )
     )
     return {row_id for (row_id,) in result.all()}
-
-
-async def _reconciliar_ativo(
-    session: "AsyncSession", fonte_tabela: str, ativos_fonte_ids: set[int]
-) -> None:
-    """
-    Reconcilia `chunk.ativo` de uma fonte sincronizada (`curso_objecao`/`faq`)
-    com o conjunto vigente de `fonte_id`s ATIVOS da origem: ativa os presentes
-    e DESATIVA os orfaos (fonte removida ou marcada `ativo=False`). Sem esta
-    reconciliacao, um upsert-only deixaria chunks de conteudo que saiu da Base
-    Oficial ainda `ativo=True` e recuperaveis — violacao anti-alucinacao
-    (servir apenas a Base Oficial vigente). NAO toca `fonte_tabela='admin'`
-    (curadoria manual; tombstone via DELETE /admin/chunks).
-    """
-    stmt = (
-        update(Chunk)
-        .where(Chunk.fonte_tabela == fonte_tabela)
-        .values(ativo=Chunk.fonte_id.in_(sorted(ativos_fonte_ids)))
-    )
-    result = await session.execute(stmt)
-    logger.info(
-        "rag_seed: reconciliacao ativo de %s (%d fonte(s) ativa(s), rows=%s)",
-        fonte_tabela,
-        len(ativos_fonte_ids),
-        getattr(result, "rowcount", "?"),
-    )
 
 
 async def _embed_pendentes(
@@ -204,50 +198,45 @@ async def run_rag_seed(
     """
     logger.info("rag_seed: iniciando sincronizacao de chunks...")
 
-    # `CursoObjecao` nao tem coluna `ativo` (diferente de `Faq`): a unica
-    # forma de saida da Base Oficial e a delecao da linha — coberta pela
-    # reconciliacao de `ativo` abaixo (fonte_id ausente -> chunk orfao).
+    def _row(fonte_tabela, tipo, idioma, curso_id, fonte_id, conteudo):
+        return {
+            "curso_id": curso_id,
+            "tipo": tipo,
+            "idioma": idioma,
+            "conteudo": conteudo,
+            "conteudo_hash": chunk_conteudo_hash(conteudo),
+            "fonte_tabela": fonte_tabela,
+            "fonte_id": fonte_id,
+        }
+
     objecoes = (await session.execute(select(CursoObjecao))).scalars().all()
     objecao_rows = [
-        {
-            "curso_id": o.curso_id,
-            "tipo": "objecao",
-            "idioma": o.idioma,
-            "conteudo": _objecao_conteudo(o.objecao, o.resposta),
-            "fonte_tabela": "curso_objecao",
-            "fonte_id": o.id,
-        }
+        _row("curso_objecao", "objecao", o.idioma, o.curso_id, o.id,
+             _objecao_conteudo(o.objecao, o.resposta))
         for o in objecoes
     ]
-    ativos_objecao = {o.id for o in objecoes}
-    changed = await _upsert_chunks_from_rows(session, objecao_rows)
+    await _upsert_chunks_from_rows(session, objecao_rows)
 
     faqs = (
         await session.execute(select(Faq).where(Faq.ativo.is_(True)))
     ).scalars().all()
     faq_rows = [
-        {
-            "curso_id": None,
-            "tipo": "faq",
-            "idioma": f.idioma,
-            "conteudo": _faq_conteudo(f.pergunta, f.resposta),
-            "fonte_tabela": "faq",
-            "fonte_id": f.id,
-        }
+        _row("faq", "faq", f.idioma, None, f.id, _faq_conteudo(f.pergunta, f.resposta))
         for f in faqs
     ]
-    ativos_faq = {f.id for f in faqs}
-    changed |= await _upsert_chunks_from_rows(session, faq_rows)
+    await _upsert_chunks_from_rows(session, faq_rows)
 
-    # Reconciliacao de `ativo` (tombstoning): fontes removidas/desativadas
-    # nao podem continuar recuperaveis (anti-alucinacao — servir apenas a
-    # Base Oficial vigente). Roda tambem no caminho sem openai_client.
-    await _reconciliar_ativo(session, "curso_objecao", ativos_objecao)
-    await _reconciliar_ativo(session, "faq", ativos_faq)
+    # Purga de orfaos por CONTEUDO: conteudo que saiu da Base Oficial (fonte
+    # deletada/editada, FAQ desativada) e removido — mantem a tabela limitada e
+    # a recuperacao ancorada so na base vigente (anti-alucinacao). NAO toca
+    # `admin`/base. Roda tambem no caminho sem openai_client.
+    await _purge_orfaos(
+        session, "curso_objecao", {r["conteudo_hash"] for r in objecao_rows}
+    )
+    await _purge_orfaos(session, "faq", {r["conteudo_hash"] for r in faq_rows})
 
     logger.info(
-        "rag_seed: %d chunk(s) inserido(s)/atualizado(s) (objecao=%d, faq=%d candidatos)",
-        len(changed),
+        "rag_seed: sincronizacao de texto concluida (objecao=%d, faq=%d)",
         len(objecao_rows),
         len(faq_rows),
     )
@@ -260,11 +249,11 @@ async def run_rag_seed(
         await session.commit()
         return
 
-    # Candidatos a (re)embedding: alterados (embedding vigente ficou obsoleto)
-    # UNIAO todo chunk ATIVO com `embedding IS NULL` (novos + `admin`/base
-    # curados + recovery de boot interrompido).
-    pendentes = changed.copy()
-    pendentes |= await _pendentes_embedding_todos(session)
+    # Candidatos a embedding: todo chunk ATIVO com `embedding IS NULL` — apenas
+    # conteudo NOVO (upsert por conteudo preserva o embedding do inalterado),
+    # `admin`/base curados e recovery de boot interrompido. Conteudo inalterado
+    # entre boots => nenhum embedding recomputado (FR-009).
+    pendentes = await _pendentes_embedding_todos(session)
 
     if pendentes:
         n = await _embed_pendentes(session, openai_client, sorted(pendentes))
